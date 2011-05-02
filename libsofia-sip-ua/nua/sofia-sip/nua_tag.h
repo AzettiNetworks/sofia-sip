@@ -539,6 +539,11 @@ SOFIAPUBVAR tag_typedef_t nutag_sub_expires;
 #define NUTAG_SUB_EXPIRES_REF(x) nutag_sub_expires_ref, tag_uint_vr(&(x))
 SOFIAPUBVAR tag_typedef_t nutag_sub_expires_ref;
 
+#define NUTAG_SUB_NO_REFRESH(x)   nutag_sub_no_refresh, tag_bool_v(x)
+SOFIAPUBVAR tag_typedef_t nutag_sub_no_refresh;
+#define NUTAG_SUB_NO_REFRESH_REF(x) nutag_sub_no_refresh_ref, tag_bool_vr(&(x))
+SOFIAPUBVAR tag_typedef_t nutag_sub_no_refresh_ref;
+
 #define NUTAG_NEWSUB(x)   nutag_newsub, tag_bool_v(x)
 SOFIAPUBVAR tag_typedef_t nutag_newsub;
 #define NUTAG_NEWSUB_REF(x) nutag_newsub_ref, tag_bool_vr(&(x))

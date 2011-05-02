@@ -1,3 +1,13 @@
+2011-05-02  Tomasz Gebarowski  <tomasz.gebarowski@azetti.com>
+
+	* sofia-sip/nua_tag.h (NUTAG_SUB_NO_REFRESH): NUTAG_SUB_NO_REFRESH defined to
+	allow subscribe dialog auto-refreshing
+	* nua_tag.c (nutag_sub_no_refresh): Idem.
+	* nua_subnotref.c (nua_subscribe_client_request)
+	* nua_subnotref.c (nua_subscribe_client_response):
+	* nua_subnotref.c (nua_subscribe_client_init):
+	Added NUTAG_SUB_NO_REFRESH handling
+
 2005-11-15  Kai Vehmanen  <kai.vehmanen@nokia.com>
 
 	* Removed obsolete NUTAG_MEDIA* tags.

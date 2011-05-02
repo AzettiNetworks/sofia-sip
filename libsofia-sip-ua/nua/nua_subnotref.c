@@ -61,6 +61,7 @@ struct event_usage
   enum nua_substate eu_substate;	/**< Subscription state */
   unsigned eu_delta;	                /**< Proposed expiration */
   sip_time_t eu_expires;	        /**< Absolute expiration time */
+  unsigned eu_no_refresh;           /**< Refresh subscription dialog by default */
   unsigned eu_notified;		        /**< Number of NOTIFYs received */
   unsigned eu_unsolicited:1;	        /**< Not SUBSCRIBEd or REFERed */
   unsigned eu_refer:1;		        /**< Implied subscription by refer */
@@ -225,6 +226,11 @@ static int nua_subscribe_client_init(nua_client_request_t *cr,
   if (du == NULL && o == NULL)
     du = nua_dialog_usage_get(nh->nh_ds, nua_subscribe_usage, NONE);
 
+  tagi_t const *sub_no_refresh = tl_find_last(tags, nutag_sub_no_refresh);
+
+  SU_DEBUG_3(("nua(%p): subscribe client init\n",
+              (void *)nh));
+
   if (du) {
     if (du->du_event && o == NULL)
       /* Add Event header */
@@ -233,6 +239,21 @@ static int nua_subscribe_client_init(nua_client_request_t *cr,
   else if (cr->cr_event == nua_r_subscribe) {
     /* Create dialog usage */
     du = nua_dialog_usage_add(nh, nh->nh_ds, nua_subscribe_usage, o);
+
+    struct event_usage *eu = nua_dialog_usage_private(du);
+
+    if (sub_no_refresh && sub_no_refresh->t_value)
+    {
+      SU_DEBUG_3(("nua(%p): blocking subscribe refreshing",
+                  (void *)nh));
+      eu->eu_no_refresh = 1;
+    }
+    else
+    {
+      SU_DEBUG_3(("nua(%p): allowing subscribe refreshing",
+                  (void *)nh));
+      eu->eu_no_refresh = 0;
+    }
     /* Note that we allow SUBSCRIBE without event */
   }
 
@@ -273,7 +294,8 @@ static int nua_subscribe_client_request(nua_client_request_t *cr,
     }
 #endif
 
-    nua_dialog_usage_reset_refresh(du); /* during SUBSCRIBE transaction */
+    if (!eu->eu_no_refresh)
+       nua_dialog_usage_reset_refresh(du); /* during SUBSCRIBE transaction */
 
     if (cr->cr_terminating || cr->cr_event != nua_r_subscribe)
       expires = eu->eu_delta = 0;
@@ -383,7 +405,8 @@ static int nua_subscribe_client_response(nua_client_request_t *cr,
     }
 
     if (delta > 0) {
-      nua_dialog_usage_set_refresh(du, delta);
+      if (!eu->eu_no_refresh)
+          nua_dialog_usage_set_refresh(du, delta);
       eu->eu_expires = du->du_refquested + delta;
     }
     else {
@@ -401,10 +424,12 @@ static int nua_subscribe_client_response(nua_client_request_t *cr,
 	if (!eu->eu_notified && win_messenger_enable)
 	  delta = 4 * 60; 	/* Wait 4 minutes for NOTIFY from Messenger */
 
-	nua_dialog_usage_set_refresh_range(du, delta, delta);
+      if (!eu->eu_no_refresh)
+        nua_dialog_usage_set_refresh_range(du, delta, delta);
       }
       else {
-	nua_dialog_usage_reset_refresh(du);
+        if (!eu->eu_no_refresh)
+          nua_dialog_usage_reset_refresh(du);
       }
 
       eu->eu_expires = du->du_refquested;
@@ -867,6 +892,7 @@ static int nua_refer_client_request(nua_client_request_t *cr,
       du0->du_event == NULL ||
       du0->du_event->o_id == NULL ||
       strcmp(du0->du_event->o_id, event->o_id)) {
+
     du = nua_dialog_usage_add(nh, nh->nh_ds, nua_subscribe_usage, event);
     if (!du)
       return -1;

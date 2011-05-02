@@ -954,6 +954,33 @@ tag_typedef_t nutag_sub_expires = UINTTAG_TYPEDEF(substate);
  * Reference tag for NUTAG_SUB_EXPIRES().
  */
 
+/**@def NUTAG_SUBSTATE_REF(x)
+ * Reference tag for NUTAG_SUBSTATE().
+ */
+
+
+/**@def NUTAG_SUB_NO_REFRESH()
+ *
+ * Block refresh for subscription
+ *
+ * @par Used with
+ * - nua_subscribe
+ *
+ * @par Parameter type
+ *    int (boolean: nonzero is true, zero is false)
+ *
+ * @par Values
+ *   - 0 - false (default) - alow for subscription refreshing
+ *   - 1 - true - block subscription refreshing
+ *
+ * Corresponding tag taking reference parameter is NUTAG_SUB_NO_REFRESH().
+ */
+tag_typedef_t nutag_sub_no_refresh = BOOLTAG_TYPEDEF(sub_no_refresh);
+
+/**@def NUTAG_SUB_NO_REFRESH(x)
+ * Reference tag for NUTAG_SUB_NO_REFRESH().
+ */
+
 
 /**@def NUTAG_NEWSUB()
  *
