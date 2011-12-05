@@ -228,9 +228,6 @@ static int nua_subscribe_client_init(nua_client_request_t *cr,
 
   tagi_t const *sub_no_refresh = tl_find_last(tags, nutag_sub_no_refresh);
 
-  SU_DEBUG_3(("nua(%p): subscribe client init\n",
-              (void *)nh));
-
   if (du) {
     if (du->du_event && o == NULL)
       /* Add Event header */
@@ -244,14 +241,10 @@ static int nua_subscribe_client_init(nua_client_request_t *cr,
 
     if (sub_no_refresh && sub_no_refresh->t_value)
     {
-      SU_DEBUG_3(("nua(%p): blocking subscribe refreshing",
-                  (void *)nh));
       eu->eu_no_refresh = 1;
     }
     else
     {
-      SU_DEBUG_3(("nua(%p): allowing subscribe refreshing",
-                  (void *)nh));
       eu->eu_no_refresh = 0;
     }
     /* Note that we allow SUBSCRIBE without event */
