@@ -250,7 +250,7 @@ int process_3489_request(stun_mini_t *mini,
   /* MAPPED-ADDRESS */
   a = calloc(1, sizeof *a); if (!a) return STUN_500_SERVER_ERROR;
   a->attr_type = MAPPED_ADDRESS;
-  addr = malloc(sizeof *addr); if (!addr) return STUN_500_SERVER_ERROR;
+  addr = malloc(sizeof *addr); if (!addr) {free(a); return STUN_500_SERVER_ERROR;}
   memcpy(addr, from, sizeof *addr);
   a->pattr = addr;
   *next = a; next = &a->next;
@@ -313,7 +313,7 @@ int process_3489_request(stun_mini_t *mini,
 
   a = calloc(1, sizeof *a); if (!a) return STUN_500_SERVER_ERROR;
   a->attr_type = SOURCE_ADDRESS;
-  addr = malloc(sizeof *addr); if (!addr) return STUN_500_SERVER_ERROR;
+  addr = malloc(sizeof *addr); if (!addr) {free(a); return STUN_500_SERVER_ERROR;}
   memcpy(addr, ss->ss_addr.array, sizeof *addr);
   a->pattr = addr;
   *next = a; next = &(a->next);
@@ -324,12 +324,12 @@ int process_3489_request(stun_mini_t *mini,
     /* CHANGED-ADDRESS */
     a = malloc(sizeof *a); if (!a) return STUN_500_SERVER_ERROR;
     a->attr_type = CHANGED_ADDRESS;
-    addr = malloc(sizeof *addr); if (!addr) return STUN_500_SERVER_ERROR;
+    addr = malloc(sizeof *addr); if (!addr) {free(a); return STUN_500_SERVER_ERROR;}
     memcpy(addr, changed->ss_addr.array, sizeof *addr);
 
     a->pattr = addr;
     a->next = NULL;
-    *next = a; next = &(a->next);
+    *next = a;
   }
 
   stun_send_message(socket, (void *)from, response, NULL);
@@ -377,7 +377,10 @@ int send_stun_error(stun_msg_t *response,
   errorcode->code = error;
   errorcode->phrase = malloc(strlen(phrase) + 1);
   if (!errorcode->phrase)
+  {
+    free(errorcode);
     return -1;
+  }
   strcpy(errorcode->phrase, phrase);
   attr->pattr = errorcode;
 
