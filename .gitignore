@@ -32,3 +32,4 @@ TAGS
 *.o
 *_tag_ref.c
 test-driver
+*.trs
