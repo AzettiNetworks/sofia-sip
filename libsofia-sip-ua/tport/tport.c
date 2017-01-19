@@ -3053,6 +3053,9 @@ static void tport_parse(tport_t *self, int complete, su_time_t now)
   for (; msg; msg = next) {
     n = msg_extract(msg);	/* Parse message */
 
+    SU_DEBUG_5(("%s(%p): Parse message %s\n",
+            __func__, (void *)self,
+            (n > 0 ? "COMPLETE" : (n == 0 ? "INCOMPLETE" : "INVALID") )));
     streaming = 0;
 
     if (n == 0) {
@@ -3142,13 +3145,16 @@ void tport_deliver(tport_t *self,
 
   error = msg_has_error(msg);
 
-  if (error && !*msg_chain_head(msg)) {
-    /* This is badly damaged packet */
-  }
-  else if (self->tp_master->mr_log && msg != self->tp_rlogged) {
-    char const *via = "recv";
-    tport_log_msg(self, msg, via, "from", now);
+  if (self->tp_master->mr_log && msg != self->tp_rlogged) {
     self->tp_rlogged = msg;
+    if (error && !*msg_chain_head(msg)) {
+      su_log("   Badly damaged packet received from " TPN_FORMAT "\n",
+              TPN_ARGS(d->d_from));
+    }
+    else {
+      char const *via = "recv";
+      tport_log_msg(self, msg, via, "from", now);
+    }
   }
 
   SU_DEBUG_7(("%s(%p): %smsg %p ("MOD_ZU" bytes)"
@@ -4681,7 +4687,7 @@ tport_t *tport_by_name(tport_t const *tp, tp_name_t const *tpn)
 	nocomp = self;
       continue;
     }
-    
+
     if (family == AF_INET && tpn->tpn_host && strcmp(tpn->tpn_host, "127.0.0.1") == 0 && ntohl(tp->tp_addr->su_sin.sin_addr.s_addr) == INADDR_LOOPBACK) {
       SU_DEBUG_7(("tport: default primary changed to AF_INET loopback\n"));
       default_primary = tp;
@@ -4692,7 +4698,7 @@ tport_t *tport_by_name(tport_t const *tp, tp_name_t const *tpn)
     if (!default_primary) {
       default_primary=tp;
     }
-    
+
 
     secondary=tport_by_name_from_primary(tp,tpn);
     if (secondary) {

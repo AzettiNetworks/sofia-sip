@@ -176,7 +176,7 @@ void tport_stamp(tport_t const *self, msg_t *msg,
   su_inet_ntop(su->su_family, SU_ADDR(su), name, sizeof(name));
 
   snprintf(stamp, 128,
-	   "%s "MOD_ZU" bytes %s %s/[%s]:%u%s%s at %02u:%02u:%02u.%06lu:\n",
+	   "%s "MOD_ZU" bytes %s %s/[%s]:%u%s%s at %02u:%02u:%02u.%06lu\n",
 	   what, (size_t)n, via, self->tp_name->tpn_proto,
 	   name, ntohs(su->su_port), label[0] ? label : "", comp,
 	   hour, minute, second, now.tv_usec);
@@ -233,6 +233,17 @@ void tport_log_msg(tport_t *self, msg_t *msg,
 
   tport_stamp(self, msg, stamp, what, n, via, now);
   su_log("%s   " MSG_SEPARATOR, stamp);
+
+  if (msg_has_error(msg)) {
+    msg_header_t *head = *msg_chain_head(msg);
+    if (!head) {
+      su_log("   ***BADLY*** damaged packet %s \n", what);
+      iovlen = 0;
+    } else {
+      su_log("   ***INVALID*** packet %s \n", what);
+      iovlen = 1;
+    }
+  }
 
   for (i = 0; truncated == 0 && i < iovlen && i < 80; i++) {
     char *s = iov[i].mv_base, *end = s + iov[i].mv_len;

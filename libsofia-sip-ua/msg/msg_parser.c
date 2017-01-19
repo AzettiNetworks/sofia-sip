@@ -58,6 +58,7 @@
 #include "sofia-sip/msg_mclass.h"
 #include "sofia-sip/msg_mclass_hash.h"
 #include "sofia-sip/msg_mime.h"
+#include <sofia-sip/su_debug.h>
 
 #if HAVE_FUNC
 #elif HAVE_FUNCTION
@@ -327,7 +328,7 @@ void *msg_buf_move(msg_t *dst, msg_t const *src)
  * @param[in]  msg     message object
  * @param[out] vec     I/O vector
  * @param[in]  veclen  available length of @a vec
- * @param[in]  n       number of possibly available bytes 
+ * @param[in]  n       number of possibly available bytes
  * @param[in]  exact   true if data ends at message boundary
  *
  * @return
@@ -815,8 +816,6 @@ int msg_unref_external(msg_t *msg, msg_buffer_t *b)
 su_inline int extract_incomplete_chunks(msg_t *, int eos);
 static issize_t extract_first(msg_t *, msg_pub_t *,
 			    char b[], isize_t bsiz, int eos);
-su_inline issize_t extract_next(msg_t *, msg_pub_t *, char *, isize_t bsiz,
-				  int eos, int copy);
 static issize_t extract_header(msg_t *, msg_pub_t*,
 			     char b[], isize_t bsiz, int eos, int copy);
 static msg_header_t *header_parse(msg_t *, msg_pub_t *, msg_href_t const *,
@@ -887,7 +886,6 @@ int msg_extract(msg_t *msg)
   b = msg->m_buffer->mb_data + msg->m_buffer->mb_used;
   bsiz = msg->m_buffer->mb_commit;
   b[bsiz] = '\0';
-
   while (msg->m_buffer->mb_commit > 0) {
     int flags = mo->msg_flags;
     int copy = MSG_IS_EXTRACT_COPY(flags);
@@ -895,14 +893,22 @@ int msg_extract(msg_t *msg)
     if (flags & MSG_FLG_COMPLETE)
       break;
 
-    if (flags & MSG_FLG_TRAILERS)
+    if (flags & MSG_FLG_TRAILERS) {
       m = extract_trailers(msg, mo, b, bsiz, eos, copy);
-    else if (flags & MSG_FLG_BODY)
+      SU_DEBUG_8(("%s(%p) Trailer: %ld B\n", __func__, (void *)msg, m));
+    }
+    else if (flags & MSG_FLG_BODY) {
       m = mc->mc_extract_body(msg, mo, b, bsiz, eos);
-    else if (flags & MSG_FLG_HEADERS)
-      m = extract_next(msg, mo, b, bsiz, eos, copy);
-    else
+      SU_DEBUG_8(("%s(%p) Body: %ld B\n", __func__, (void *)msg, m));
+    }
+    else if (flags & MSG_FLG_HEADERS) {
+      m = extract_header(msg, mo, b, bsiz, eos, copy);
+      SU_DEBUG_8(("%s(%p) Header: %ld B\n", __func__, (void *)msg, m));
+    }
+    else {
       m = extract_first(msg, mo, b, bsiz, eos);
+      SU_DEBUG_8(("%s(%p) Extracted first: %ld B\n", __func__, (void *)msg, m));
+    }
 
     if (m <= 0 || msg->m_chunk)
       break;
@@ -913,6 +919,7 @@ int msg_extract(msg_t *msg)
     msg_buf_used(msg, (size_t)m);
   }
 
+  //If it's the end of the stream and we've extracted all the data we're done
   if (eos && bsiz == 0)
     msg_mark_as_complete(msg, 0);
 
@@ -920,14 +927,8 @@ int msg_extract(msg_t *msg)
     msg_mark_as_complete(msg, MSG_FLG_ERROR);
     return -1;
   }
-  else if (!MSG_IS_COMPLETE(mo))
-    return 0;
-  else if (!(mo->msg_flags & MSG_FLG_HEADERS)) {
-    msg_mark_as_complete(msg, MSG_FLG_ERROR);
-    return -1;
-  }
-  else
-    return 1;
+
+  return MSG_IS_COMPLETE(mo);
 }
 
 static
@@ -990,17 +991,6 @@ issize_t extract_first(msg_t *msg, msg_pub_t *mo, char b[], isize_t bsiz, int eo
   return m;
 }
 
-/* Extract header or message body */
-su_inline issize_t
-extract_next(msg_t *msg, msg_pub_t *mo, char *b, isize_t bsiz,
-	     int eos, int copy)
-{
-  if (IS_CRLF(b[0]))
-    return msg->m_class->mc_extract_body(msg, mo, b, bsiz, eos);
-  else
-    return extract_header(msg, mo, b, bsiz, eos, copy);
-}
-
 /** Extract a header. */
 issize_t msg_extract_header(msg_t *msg, msg_pub_t *mo,
 			    char b[], isize_t bsiz, int eos)
@@ -1023,6 +1013,14 @@ extract_header(msg_t *msg, msg_pub_t *mo, char *b, isize_t bsiz, int eos,
   msg_header_t *h;
   msg_href_t const *hr;
   msg_mclass_t const *mc = msg->m_class;
+
+  /*
+   * If the header is just an extra CRLF we have found the end of the headers
+   */
+  crlf = CRLF_TEST(b);
+  if (crlf) {
+    return mc->mc_extract_body(msg, mo, b, bsiz, eos);
+  }
 
   hr = msg_find_hclass(mc, b, &n); /* Get header name */
   error = n == 0;
@@ -1071,10 +1069,9 @@ extract_header(msg_t *msg, msg_pub_t *mo, char *b, isize_t bsiz, int eos,
     h = header_parse(msg, mo, hr, b + name_len, n - name_len, copy_buffer);
   }
 
-  if (h == NULL)
-    return -1;
-
   len = n + crlf;
+  if (h == NULL || len == 0)
+    return -1;
 
   /*
    * If the header contains multiple header fields, set the pointer to the
