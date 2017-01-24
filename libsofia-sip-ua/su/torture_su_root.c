@@ -337,6 +337,7 @@ static int register_test(root_test_t *rt)
   int i;
   int s;
   char *msg = "foo";
+  uint msg_length = strlen(msg);
 
   BEGIN();
 
@@ -351,8 +352,8 @@ static int register_test(root_test_t *rt)
 
   for (i = 0; i < 5; i++) {
     test_ep_t *ep = rt->rt_ep[i];
-    TEST_SIZE(su_sendto(s, msg, sizeof(msg), 0, ep->addr, ep->addrlen),
-	      sizeof(msg));
+    TEST(su_sendto(s, msg, msg_length, 0, ep->addr, ep->addrlen),
+	 msg_length);
     test_run(rt);
     TEST(rt->rt_received, i);
     TEST(rt->rt_wakeup, i);
@@ -374,8 +375,8 @@ static int register_test(root_test_t *rt)
 
   for (i = 0; i < 5; i++) {
     test_ep_t *ep = rt->rt_ep[i];
-    TEST_SIZE(su_sendto(s, msg, sizeof(msg), 0, ep->addr, ep->addrlen),
-	      sizeof(msg));
+    TEST(su_sendto(s, msg, msg_length, 0, ep->addr, ep->addrlen),
+	 msg_length);
     test_run(rt);
     TEST(rt->rt_received, i);
     TEST(rt->rt_wakeup, i);
@@ -397,8 +398,8 @@ static int register_test(root_test_t *rt)
 
   for (i = 0; i < 5; i++) {
     test_ep_t *ep = rt->rt_ep[i];
-    TEST_SIZE(su_sendto(s, msg, sizeof(msg), 0, ep->addr, ep->addrlen),
-	      sizeof(msg));
+    TEST(su_sendto(s, msg, msg_length, 0, ep->addr, ep->addrlen),
+	 msg_length);
     test_run(rt);
     TEST(rt->rt_received, i);
     TEST(rt->rt_wakeup, i);
