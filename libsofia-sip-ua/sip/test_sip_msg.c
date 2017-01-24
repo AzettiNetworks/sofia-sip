@@ -155,7 +155,7 @@ void print_via(FILE *f, sip_via_t *v)
 int main(int argc, char *argv[])
 {
   char urlbuf[1024];
-  size_t n;
+  ssize_t n;
   int m, tcp;
   sip_t *sip;
   int exitcode = 0;
