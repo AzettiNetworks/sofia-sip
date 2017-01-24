@@ -218,6 +218,7 @@ int test_api_errors(void)
   sres_sort_answers(NULL, NULL);
 
   sres_resolver_unref(res);
+  su_home_unref(ctx->home);
 
   END();
 }
