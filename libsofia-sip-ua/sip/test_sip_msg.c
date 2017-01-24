@@ -161,6 +161,7 @@ int main(int argc, char *argv[])
   int exitcode = 0;
   msg_mclass_t const *sip_mclass = sip_default_mclass();
   msg_t *msg = msg_create(sip_mclass, MSG_FLG_EXTRACT_COPY);
+  msg_t *next = NULL;
   msg_iovec_t iovec[1];
 
   tcp = argv[1] && strcmp(argv[1], "-t") == 0;
@@ -288,6 +289,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "test_sip_msg: extra stuff after valid message\n");
     exit(1);
   }
+
+  msg_destroy(msg);
 
   return exitcode;
 }
