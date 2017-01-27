@@ -311,7 +311,7 @@ TPORT_DLL extern tag_typedef_t tptag_dos;
 #define TPTAG_DOS(x) tptag_dos, tag_int_v((x))
 
 TPORT_DLL extern tag_typedef_t tptag_dos_ref;
-#define TPTAG_DOS_REF(x) tptag_dos_ref, tag_int_vr(&(x))
+#define TPTAG_DOS_REF(x) tptag_dos_ref, tag_uint_vr(&(x))
 
 SOFIA_END_DECLS
 
