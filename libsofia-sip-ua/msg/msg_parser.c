@@ -1045,6 +1045,8 @@ extract_header(msg_t *msg, msg_pub_t *mo, char *b, isize_t bsiz, int eos,
 
   if (!eos && bsiz == n + crlf)
     return 0;
+  if ((bsiz != n) && b[n] == '\0')
+      return -1;
 
   if (hr->hr_class->hc_hash == msg_unknown_hash)
     name_len = 0, name_len_set = 1;
