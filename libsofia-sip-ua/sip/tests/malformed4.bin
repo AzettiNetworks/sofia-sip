@@ -1,0 +1,16 @@
+REGISTER sip:am.goptt.com:6050 SIP/2.0
+Via: SIP/2.0/TCP 162.248.53.7:6050;branch=z9hG4bKd417.0252e8c86b178bb2454d8c9c23fab73f.0;i=69
+Via: SIP/2.0/TCP 10.84.30.208:17608;received=186.9.135.181;rport=20838;branch=z9hG4bKE3FE2A1
+From: "SM-J111M" <sip:155204@poc2.azetti.com>;tag=62ACF2AD
+To: <sip:155204@poc2.azetti.com>
+Call-ID: D75A173@10.84.30.208
+CSeq: 33 REGISTER
+Contact: "SM-J111M" <sip:155204@186.9.135.181:20838;transport=TCP>;+g.poc.talkburst;+g.poc.groupad;q=0.8;expires=3600;+sip.instance="<urn:uuid:cf4f778e-fda3-3179-9fa0-f9339077bee0>"
+Allow: INVITE,AC)#•ˆŞ¢@kºÍ€•BJ½"KV“TYÈİ—¸Á­"ËÕNnom¶\3Ğ¢Úa§Ñ8¢ÿSYNg’‚ï©ÓÛÒÃOŒ5×›é÷­L«’BHTcï
+äÄº}*şÛf+=-ú=ı¡ÊÚ¿Ñd†ìÂf;b«³~Híó
+$ü({Ö;®ØÑª/|¨YÙoid_5.1.1
+Require: pref,recipient-list-invite,multiple-refer,norefersub
+Supported: timer
+Accept-Contact: *;+g.poc.talkburst;require;explicit
+Content-Length: 0
+

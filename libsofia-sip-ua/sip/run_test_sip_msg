@@ -44,14 +44,18 @@ test=./test_sip_msg
 good="-t test1.txt test2.txt test3.txt test4.txt
       -u test5.txt -t test6.txt test7.txt -u test8.txt -t test9.txt
       test14.txt test20.txt test23.txt test24.txt test31.txt
-      own1.txt own2.txt own3.txt own4.txt own5.txt own6.txt"
+      own1.txt own2.txt own3.txt own4.txt own5.txt own6.txt
+      good1.bin good2.bin"
+      
 # These are messages that the parser should fail
 bad="test10.txt test11.txt test12.txt test13.txt test15.txt
      test16.txt test17.txt test18.txt test19.txt
      test21.txt test22.txt
      test26.txt test29.txt test33.txt
      test35.txt
-     test40.txt"
+     test40.txt 
+     malformed1.bin malformed2.bin malformed3.bin malformed4.bin
+     malformed5.bin"
 # These are ugly messages that parser should pass
 ugly="-t test25.txt -u test27.txt test28.txt -t test30.txt
       -u test32.txt test34.txt -t test36.txt -u test37.txt
@@ -78,10 +82,10 @@ done
 
 for n in $bad;
 do
-    if "$test" -t < "$srcdir/tests/$n" > /dev/null 2>/dev/null ; then
-	echo "ERROR: $n (no error detected)"; rc=1
-    else
+    if "$test" -e -t < "$srcdir/tests/$n" > /dev/null 2>/dev/null ; then
 	echo "PASS: $n"
+    else
+	echo "ERROR: $n"; rc=1
     fi
 done
 
