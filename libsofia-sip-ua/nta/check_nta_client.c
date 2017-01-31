@@ -178,6 +178,7 @@ START_TEST(client_2_0_2)
   response = s2_nta_wait_for(wait_for_orq, orq,
 			     wait_for_status, 200,
 			     0);
+  s2_sip_free_message(request);
   s2_nta_free_event(response);
   nta_outgoing_destroy(orq);
 }
@@ -542,6 +543,7 @@ static void invite_setup(void)
 static void invite_teardown(void)
 {
   nta_leg_destroy(leg), leg = NULL;
+  su_home_unref(dialog->home);
 
   client_teardown();
 }
@@ -623,6 +625,7 @@ START_TEST(client_2_3_1)
   fail_unless(r_prack != NULL);
   s2_sip_respond_to(r_prack, dialog, SIP_200_OK,
 		    TAG_END());
+  s2_nta_free_event(response);
   response = s2_nta_wait_for(wait_for_orq, prack,
 			     wait_for_status, 200,
 			     0);
@@ -688,7 +691,7 @@ START_TEST(client_2_3_2)
   s2_sip_respond_to(r_prack, dialog, SIP_200_OK,
 		    TAG_END());
   s2_sip_free_message(r_prack);
-
+  s2_nta_free_event(response);
   response = s2_nta_wait_for(wait_for_orq, prack,
 			     wait_for_status, 200,
 			     0);
