@@ -3395,7 +3395,7 @@ tport_t *tport_tsend(tport_t *self,
   int reuse, sdwn_after, close_after, resolved = 0, fresh;
   unsigned mtu;
   su_addrinfo_t *ai;
-  tport_primary_t *primary;
+  tport_t *primary;
   tp_name_t tpn[1];
   struct sigcomp_compartment *cc;
 
@@ -3411,21 +3411,9 @@ tport_t *tport_tsend(tport_t *self,
   SU_DEBUG_7(("tport_tsend(%p) tpn = " TPN_FORMAT "\n",
 	      (void *)self, TPN_ARGS(tpn)));
 
-  if (tport_is_master(self)) {
-    /*tport_by_name() might return a secondary transport if exist, otherwise a primary transport */
-    primary = (tport_primary_t *)tport_by_name(self, tpn);
-    if (!primary) {
-      msg_set_errno(msg, EPROTONOSUPPORT);
-      return NULL;
-    }
-  }
-  else {
-    primary = self->tp_pri;
-  }
-
   ta_start(ta, tag, value);
 
-  reuse = primary->pri_primary->tp_reusable && self->tp_reusable;
+  reuse = self->tp_reusable;
   fresh = 0;
   sdwn_after = 0;
   close_after = 0;
@@ -3475,26 +3463,42 @@ tport_t *tport_tsend(tport_t *self,
 
   if (fresh) {
     /* Select a primary protocol, make a fresh connection */
-    self = primary->pri_primary;
+    self = tport_primary_by_name(self, tpn);
   }
   else if (tport_is_secondary(self) && tport_is_clear_to_send(self)) {
-    self = self;
+    /* It is possible to use the current connection */
+    ;
   }
-  /*
-   * Try to find an already open connection to the destination,
-   * or get a primary protocol
-   */
   else {
-    /* If primary, resolve the destination address, store it in the msg */
-    if (tport_resolve(primary->pri_primary, msg, tpn) < 0) {
-      return NULL;
+    if (tport_is_master(self)) {
+      /* tport_by_name() might return a secondary transport if exist,
+       * otherwise a primary transport */
+      primary = tport_by_name(self, tpn);
+      if (!primary) {
+        msg_set_errno(msg, EPROTONOSUPPORT);
+        return NULL;
+      }
     }
-    resolved = 1;
+    else {
+      primary = (tport_t *) self->tp_pri;
+    }
 
-    self = tport_by_addrinfo(primary, msg_addrinfo(msg), tpn);
+    if (tport_is_secondary(primary) && tport_is_clear_to_send(primary)) {
+      self = (tport_t *) primary;
+    }
+    else {
+      /* If primary, resolve the destination address, store it in the msg */
+      if (tport_resolve(primary->tp_pri->pri_primary, msg, tpn) < 0) {
+        return NULL;
+      }
+      resolved = 1;
 
-    if (!self)
-      self = primary->pri_primary;
+      self = tport_by_addrinfo((tport_primary_t *) primary,
+                               msg_addrinfo(msg), tpn);
+
+      if (!self)
+        self = primary->tp_pri->pri_primary;
+    }
   }
 
   if (tport_is_primary(self)) {
@@ -3517,7 +3521,7 @@ tport_t *tport_tsend(tport_t *self,
 	tpn->tpn_comp = NULL;
 
       /* Create a secondary transport which is connected to the destination */
-      self = tport_connect(primary, msg_addrinfo(msg), tpn);
+      self = tport_connect((tport_primary_t *) self, msg_addrinfo(msg), tpn);
 
 #if 0 && HAVE_UPNP /* We do not want to use UPnP with secondary transports! */
       upnp_deregister_upnp_client(0, 0);
