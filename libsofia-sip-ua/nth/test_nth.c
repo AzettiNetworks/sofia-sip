@@ -212,10 +212,10 @@ static int deinit_test(tester_t *t)
   }
 
   su_root_destroy(t->t_root);
-
+  free(t->t_mclass);
   su_home_deinit(t->t_home);
 
-  memset(t, 0, sizeof t);
+  memset(t, 0, sizeof *t);
 
   END();
 }

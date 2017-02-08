@@ -87,10 +87,12 @@ START_TEST(server_3_0_0)
   fail_unless(request->irq != NULL);
 
   nta_incoming_treply(request->irq, SIP_200_OK, TAG_END());
-  nta_incoming_destroy(request->irq);
-
   response = s2_sip_wait_for_response(200, SIP_METHOD_MESSAGE);
   fail_unless(response != NULL);
+
+  if (dialog->invite) msg_unref(dialog->invite);
+  s2_nta_free_event(request), request = NULL;
+  s2_sip_free_message(response);
 }
 END_TEST
 
@@ -137,12 +139,14 @@ START_TEST(server_3_0_1)
   fail_unless(request->irq != NULL);
 
   fail_if(nta_incoming_treply(request->irq, SIP_200_OK, TAG_END()) != 0);
-  nta_incoming_destroy(request->irq);
 
   response = s2_sip_wait_for_response(200, SIP_METHOD_MESSAGE);
   fail_unless(response != NULL);
   fail_unless(response->sip->sip_via != NULL &&
 	      response->sip->sip_via->v_next != NULL);
+
+  s2_nta_free_event(request), request = NULL;
+  s2_sip_free_message(response);
 }
 END_TEST
 

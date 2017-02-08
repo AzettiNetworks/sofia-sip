@@ -1,0 +1,16 @@
+REGISTER sip:poc2.azetti.com SIP/2.0
+Via: SIP/2.0/TCP 162.248.53.7:6050;branch=z9hG4bKfa15.0e3bc5b44ebf246d0c61165b01ea740e.0;i=5532
+Via: SIP/2.0/TCP 127.0.0.1:5061;received=83.48.11.131;branch=z9hG4bK-6781-1-0
+From: SippTest <sip:34916586953@poc2.azetti.com>;tag=1
+To: <sip:34916586953@poc2.azetti.com>
+Call-ID: REG///1-6781@127.0.0.1
+CSeq: 1 REGISTER
+Contact: SippTest <sip:34916586953@83.48.11.131:57517;transport=TCP>;+g.poc.talkburst;+g.poc.groupad;q=0.8;expires=3600;+sip.instance="<urn:uuid:a943bcf9-4db9-370e-bad4-6249082a574f>"
+Allow: INVITE,ACK,CANCEL,BYE,NOTIFY,REFER,MESSAGE
+Max-Forwards: 70
+User-Agent: PoC-client/OMA1.0 Azetti-PTTP-sipp
+Require: pref,recipient-list-invite,multiple-refer,norefersub
+Supported: timer
+Accept-Contact: *;+g.poc.talkburst;require;explicit
+Content-Length:     0
+

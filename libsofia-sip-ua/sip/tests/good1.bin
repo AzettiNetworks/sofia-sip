@@ -1,0 +1,19 @@
+PUBLISH sip:186482@poc2.azetti.com SIP/2.0
+Via: SIP/2.0/TCP 162.248.53.7:6050;branch=z9hG4bK12e9.d9d8b606766c383c64792bcc03387a3c.0;i=0c32
+Via: SIP/2.0/TCP 191.125.146.240:35416;received=191.125.146.240;rport=35416;branch=z9hG4bK7A90D7B9
+From: "SM-J200M" <sip:186482@poc2.azetti.com>;tag=41B9438F
+To: <sip:186482@poc2.azetti.com>
+Call-ID: 2EF0AFB@191.125.146.240
+CSeq: 4 PUBLISH
+Contact: "SM-J200M" <sip:186482@191.125.146.240:35416;transport=TCP>;+g.poc.talkburst;+g.poc.groupad;q=0.8
+Content-Type: application/poc-settings+xml
+Allow: INVITE,ACK,CANCEL,BYE,NOTIFY,REFER,MESSAGE
+Max-Forwards: 70
+User-Agent: PoC-client/OMA1.0 Azetti-PTTP/v3.0.1 samsung-SM-J200M-j2lteub-Android_5.1.1
+Require: pref,recipient-list-invite,multiple-refer,norefersub
+Supported: timer
+Accept-Contact: *;+g.poc.talkburst;require;explicit
+Event: poc-settings
+Content-Length:   543
+
+<?xml version="1.0" encoding="UTF-8"?><poc-settings xmlns="urn:oma:params:xml:ns:poc:poc-settings" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oma:params:xml:ns:poc:poc-settings"><entity id="1484329176"><isb-settings><incoming-session-barring active="true"/></isb-settings><am-settings><answer-mode>auto</answer-mode></am-settings><ipab-settings><incoming-personal-alert-barring active="true"/></ipab-settings><sss-settings><simultaneous-sessions-support active="true"/></sss-settings></entity></poc-settings>

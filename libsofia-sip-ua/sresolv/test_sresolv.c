@@ -1872,7 +1872,7 @@ int test_deinit(sres_context_t *ctx)
   sres_resolver_unref(ctx->resolver); ctx->resolver = NULL;
 
   offset = 0;
-  memset(ctx, 0, sizeof ctx);
+  memset(ctx, 0, sizeof *ctx);
   ctx->home->suh_size = sizeof ctx;
 
   return 0;

@@ -136,9 +136,10 @@ int main(int argc, char *argv[])
   return retval;
 }
 
-msg_t *read_message(char const buffer[])
+static msg_t *read_message(char const buffer[])
 {
-  int i, n, m;
+  size_t n;
+  int m;
   msg_t *msg;
   msg_iovec_t iovec[2];
 
@@ -147,28 +148,13 @@ msg_t *read_message(char const buffer[])
     return NULL;
 
   msg = msg_create(test_mclass, MSG_DO_EXTRACT_COPY);
-
-  for (i = 0; i < n;) {
-    if (msg_recv_iovec(msg, iovec, 2, 10, 0) < 0) {
-      perror("msg_recv_iovec");
-      return NULL;
-    }
-    *(char *)(iovec->mv_base) = buffer[i++];
-    msg_recv_commit(msg, 1, i == n);
-
-    m = msg_extract(msg);
-    if (m < 0) {
-      fprintf(stderr, "test_http: parsing error\n");
-      return NULL;
-    }
-    if (m > 0)
-      break;
+  if (msg_recv_iovec(msg, iovec, 2, n, 1) < 0) {
+    perror("msg_recv_iovec");
   }
+  memcpy(iovec->mv_base, buffer, n);
+  msg_recv_commit(msg, n, 1);
 
-  if (i != n) {
-    fprintf(stderr, "test_http: parser error (len=%u, read=%u)\n", n, i);
-    msg_destroy(msg), msg = NULL;
-  }
+  m = msg_extract(msg);
 
   return msg;
 }
@@ -829,6 +815,7 @@ static int http_header_handling_test(void)
   TEST_SIZE(http_content_length_class->hc_params,
 	    offsetof(http_content_length_t, l_common));
 
+  msg_destroy(msg);
   su_home_unref(home);
 
   END();
@@ -1433,7 +1420,7 @@ static int http_tag_test(void)
   {
     msg_t *msg;
     http_t *http;
-
+    su_home_t *home = su_home_new(sizeof *home);
     http_referer_t *r;
     http_upgrade_t *u;
 
@@ -1449,8 +1436,8 @@ static int http_tag_test(void)
     TEST_1(http->http_status);
     TEST_1(http->http_server);
 
-    r = http_referer_make(NULL, "ftp://ftp.funet.fi"); TEST_1(r);
-    u = http_upgrade_make(NULL, "HTTP/1.1, TLS/1.1"); TEST_1(u);
+    r = http_referer_make(home, "ftp://ftp.funet.fi"); TEST_1(r);
+    u = http_upgrade_make(home, "HTTP/1.1, TLS/1.1"); TEST_1(u);
 
     TEST_1(u->k_items);
     TEST_S(u->k_items[0], "HTTP/1.1");
@@ -1475,6 +1462,7 @@ static int http_tag_test(void)
     TEST_1(http->http_vary);
     TEST_1(http->http_payload);
 
+    su_home_unref(home);
     msg_destroy(msg);
   }
 

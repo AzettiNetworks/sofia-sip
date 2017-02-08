@@ -113,11 +113,15 @@ typedef struct {
 
   unsigned tpp_drop;		/**< Packet drop probablity */
   int      tpp_tos;         	/**< IP TOS */
+  unsigned tpp_dos_time_period; /**<dos protection*/
+  unsigned tls_verify_policy;  /**<copied from TLS transport*/
 
   unsigned tpp_conn_orient:1;   /**< Connection-orienteded */
   unsigned tpp_sdwn_error:1;	/**< If true, shutdown is error. */
   unsigned tpp_stun_server:1;	/**< If true, use stun server */
   unsigned tpp_pong2ping:1;	/**< If true, respond with pong to ping */
+  
+ 
 
   unsigned :0;
 
@@ -186,6 +190,9 @@ struct tport_s {
 					 * connections (if primary).
                                          */
 
+  unsigned char      tp_sha1_fingerprint[20];
+
+
 #define tp_protoname tp_name->tpn_proto
 #define tp_canon     tp_name->tpn_canon
 #define tp_host      tp_name->tpn_host
@@ -239,6 +246,12 @@ struct tport_s {
     uint64_t sent_msgs, sent_errors, sent_bytes, sent_on_line;
     uint64_t recv_msgs, recv_errors, recv_bytes, recv_on_line;
   } tp_stats;
+  
+  struct {
+    uint64_t recv_msg_count_since_last_check;
+	double last_check_recv_msg_check_time;
+	double packet_count_rate;
+  } tp_dos_stats;
 };
 
 /** @internal Primary structure */
@@ -510,11 +523,6 @@ ssize_t tport_send_stream(tport_t const *self, msg_t *msg,
 int tport_tcp_next_timer(tport_t *self, su_time_t *, char const **);
 void tport_tcp_timer(tport_t *self, su_time_t);
 
-int tport_next_recv_timeout(tport_t *, su_time_t *, char const **);
-void tport_recv_timeout_timer(tport_t *self, su_time_t now);
-
-int tport_next_keepalive(tport_t *self, su_time_t *, char const **);
-void tport_keepalive_timer(tport_t *self, su_time_t now);
 
 extern tport_vtable_t const tport_sctp_vtable;
 extern tport_vtable_t const tport_sctp_client_vtable;

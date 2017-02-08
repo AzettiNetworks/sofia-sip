@@ -153,10 +153,19 @@ enum {
 #error <TSTFLAGS is not defined>
 #endif
 
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define BEGIN() BEGIN_(TSTFLAGS); {
+#define END() } END_(TSTFLAGS)
+#  endif
+#endif
+#ifndef BEGIN
 /** Begin a test function. @HIDE */
 #define BEGIN() BEGIN_(TSTFLAGS); { extern int tstdef_dummy
 /** End a test function. @HIDE */
 #define END() (void) tstdef_dummy; } END_(TSTFLAGS)
+#endif
+
 /**Test that @a suite returns a nonzero value.
  * @deprecated Use TEST_1()
  * @HIDE */

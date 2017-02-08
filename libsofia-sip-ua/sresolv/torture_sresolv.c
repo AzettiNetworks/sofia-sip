@@ -218,6 +218,7 @@ int test_api_errors(void)
   sres_sort_answers(NULL, NULL);
 
   sres_resolver_unref(res);
+  su_home_unref(ctx->home);
 
   END();
 }
@@ -233,7 +234,8 @@ int test_cache(void)
 {
   BEGIN();
 
-  sres_a_record_t *a, a0[1], **all;
+  sres_a_record_t *a, a0[1];
+  sres_record_t **all;
   sres_record_t **copy;
   char host[128];
   sres_cache_t *cache;
@@ -247,7 +249,7 @@ int test_cache(void)
   cache = sres_cache_new(N1);
   TEST_1(cache);
 
-  all = calloc(N3, sizeof *all); if (!all) perror("calloc"), exit(2);
+  all = calloc(N3 + 1, sizeof *all); if (!all) perror("calloc"), exit(2);
 
   memset(a0, 0, sizeof a0);
 
@@ -270,8 +272,57 @@ int test_cache(void)
     if (!a)
       perror("sres_cache_alloc_record"), exit(2);
 
-    all[i] = a, a->a_record->r_refcount = 1;
+    all[i] = (sres_record_t *) a, a->a_record->r_refcount = 1;
   }
+
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t0);
+
+  for (i = 0, N = N3; i < N; i++) {
+    now = base + (3600 * i + N / 2) / N;
+    a->a_record->r_ttl = 60 + (i * 60) % 3600;
+    sres_cache_store(cache, all[i], now);
+  }
+
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t1);
+  if (o_timing) {
+    t2.tv_sec = t1.tv_sec - t0.tv_sec, t2.tv_nsec = t1.tv_nsec - t0.tv_nsec;
+    if (t1.tv_nsec < t0.tv_nsec)
+      t2.tv_sec--, t2.tv_nsec += 1000000000;
+    printf("sres_cache: stored %u entries: %lu.%09ld sec\n",
+	   (unsigned)N, (long unsigned)t2.tv_sec, t2.tv_nsec);
+  }
+
+  for (i = 0, N = N3; i < N; i++)
+    TEST(all[i]->sr_a->a_record->r_refcount, 2);
+
+  TEST_1(copy = sres_cache_copy_answers(cache, (sres_record_t **)all));
+
+  for (i = 0, N = N3; i < N; i++)
+    TEST(all[i]->sr_a->a_record->r_refcount, 3);
+
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t0);
+
+  for (now = base; now <= base + 3660; now += 30)
+    sres_cache_clean(cache, now + 3600);
+
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t1);
+  if (o_timing) {
+    t2.tv_sec = t1.tv_sec - t0.tv_sec, t2.tv_nsec = t1.tv_nsec - t0.tv_nsec;
+    if (t1.tv_nsec < t0.tv_nsec)
+      t2.tv_sec--, t2.tv_nsec += 1000000000;
+    printf("sres_cache: cleaned %u entries: %lu.%09ld sec\n",
+	   (unsigned)N, (long unsigned)t2.tv_sec, t2.tv_nsec);
+  }
+
+  for (i = 0, N = N3; i < N; i++)
+    TEST(all[i]->sr_a->a_record->r_refcount, 2);
+
+  sres_cache_free_answers(cache, copy), copy = NULL;
+
+  for (i = 0, N = N3; i < N; i++)
+    TEST(all[i]->sr_a->a_record->r_refcount, 1);
+
+  base += 24 * 3600;
 
   clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t0);
 
@@ -286,61 +337,12 @@ int test_cache(void)
     t2.tv_sec = t1.tv_sec - t0.tv_sec, t2.tv_nsec = t1.tv_nsec - t0.tv_nsec;
     if (t1.tv_nsec < t0.tv_nsec)
       t2.tv_sec--, t2.tv_nsec += 1000000000;
-    printf("sres_cache: stored %u entries: %lu.%09lu sec\n",
+    printf("sres_cache: stored %u entries: %lu.%09ld sec\n",
 	   (unsigned)N, (long unsigned)t2.tv_sec, t2.tv_nsec);
   }
 
-  for (i = 0, N; i < N; i++)
-    TEST(all[i]->a_record->r_refcount, 2);
-
-  TEST_1(copy = sres_cache_copy_answers(cache, (sres_record_t **)all));
-
-  for (i = 0, N; i < N; i++)
-    TEST(all[i]->a_record->r_refcount, 3);
-
-  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t0);
-
-  for (now = base; now <= base + 3660; now += 30)
-    sres_cache_clean(cache, now + 3600);
-
-  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t1);
-  if (o_timing) {
-    t2.tv_sec = t1.tv_sec - t0.tv_sec, t2.tv_nsec = t1.tv_nsec - t0.tv_nsec;
-    if (t1.tv_nsec < t0.tv_nsec)
-      t2.tv_sec--, t2.tv_nsec += 1000000000;
-    printf("sres_cache: cleaned %u entries: %lu.%09lu sec\n",
-	   (unsigned)N, (long unsigned)t2.tv_sec, t2.tv_nsec);
-  }
-
-  for (i = 0, N; i < N; i++)
-    TEST(all[i]->a_record->r_refcount, 2);
-
-  sres_cache_free_answers(cache, copy), copy = NULL;
-
-  for (i = 0, N; i < N; i++)
-    TEST(all[i]->a_record->r_refcount, 1);
-
-  base += 24 * 3600;
-
-  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t0);
-
-  for (i = 0, N; i < N; i++) {
-    now = base + (3600 * i + N / 2) / N;
-    a->a_record->r_ttl = 60 + (i * 60) % 3600;
-    sres_cache_store(cache, (sres_record_t *)all[i], now);
-  }
-
-  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t1);
-  if (o_timing) {
-    t2.tv_sec = t1.tv_sec - t0.tv_sec, t2.tv_nsec = t1.tv_nsec - t0.tv_nsec;
-    if (t1.tv_nsec < t0.tv_nsec)
-      t2.tv_sec--, t2.tv_nsec += 1000000000;
-    printf("sres_cache: stored %u entries: %lu.%09lu sec\n",
-	   (unsigned)N, (long unsigned)t2.tv_sec, t2.tv_nsec);
-  }
-
-  for (i = 0, N; i < N; i++)
-    TEST(all[i]->a_record->r_refcount, 2);
+  for (i = 0, N = N3; i < N; i++)
+    TEST(all[i]->sr_a->a_record->r_refcount, 2);
 
   clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t0);
 
@@ -353,12 +355,12 @@ int test_cache(void)
     t2.tv_sec = t1.tv_sec - t0.tv_sec, t2.tv_nsec = t1.tv_nsec - t0.tv_nsec;
     if (t1.tv_nsec < t0.tv_nsec)
       t2.tv_sec--, t2.tv_nsec += 1000000000;
-    printf("sres_cache: cleaned %u entries: %lu.%09lu sec\n",
+    printf("sres_cache: cleaned %u entries: %lu.%09ld sec\n",
 	   (unsigned)N, (long unsigned)t2.tv_sec, t2.tv_nsec);
   }
 
-  for (i = 0, N; i < N; i++) {
-    TEST(all[i]->a_record->r_refcount, 1);
+  for (i = 0, N = N3; i < N; i++) {
+    TEST(all[i]->sr_a->a_record->r_refcount, 1);
     sres_cache_free_one(cache, (sres_record_t *)all[i]);
   }
 

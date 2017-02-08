@@ -962,6 +962,7 @@ static int test_bad_messages(agent_t *ag)
   if (dir)
     closedir(dir);
 
+  su_freeaddrinfo(ai);
 #endif /* HAVE_DIRENT_H */
 
   END();

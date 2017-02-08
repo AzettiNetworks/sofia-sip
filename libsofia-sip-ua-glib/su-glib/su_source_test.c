@@ -50,7 +50,7 @@ struct pinger;
 #include "sofia-sip/su_wait.h"
 #include "sofia-sip/su_log.h"
 
-#include <glib/gthread.h>
+#include <glib.h>
 #include "sofia-sip/su_glib.h"
 
 struct pinger {

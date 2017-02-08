@@ -52,6 +52,8 @@
 #include <sofia-sip/tport_tag.h>
 #endif
 
+#include <sys/time.h>
+
 SOFIA_BEGIN_DECLS
 
 struct tport_s;
@@ -341,7 +343,9 @@ TPORT_DLL int tport_delivered_from(tport_t *tp, msg_t const *msg,
 /** Return TLS Subjects provided by the source transport */
 TPORT_DLL su_strlst_t const *tport_delivered_from_subjects(tport_t *tp,
                                                            msg_t const *msg);
-
+/** Return TLS client certificate sha1 fingerprint (20 packets of 2 hexa digits)*/
+TPORT_DLL unsigned char *tport_delivered_sha1_fingerprint(tport_t *tp,
+                                                           msg_t const *msg);
 /** Check if the given subject string is found in su_strlst_t */
 TPORT_DLL int tport_subject_search(char const *, su_strlst_t const *);
 
@@ -366,6 +370,9 @@ TPORT_DLL char *tport_hostport(char buf[], isize_t bufsize,
 /** Initialize STUN keepalives. */
 TPORT_DLL int tport_keepalive(tport_t *tp, su_addrinfo_t const *ai,
 			      tag_type_t tag, tag_value_t value, ...);
+
+TPORT_DLL float tport_get_packet_count_rate(tport_t *tp);
+TPORT_DLL void tport_reset_packet_count_rate(tport_t *tp);
 
 /* ---------------------------------------------------------------------- */
 /* SigComp-related functions */

@@ -474,7 +474,7 @@ static int api_test_destroy(agent_t *ag)
     /* This creates a delayed response message */
     orq = nta_outgoing_tcreate(leg, outgoing_callback, ag, NULL,
 			       SIP_METHOD_MESSAGE,
-			       URL_STRING_MAKE("sip:foo.bar;transport=none"),
+			       URL_STRING_MAKE("sip:foo.bar;transport=tcp"),
 			       SIPTAG_FROM_STR("<sip:bar.foo>"),
 			       SIPTAG_TO_STR("<sip:foo.bar>"),
 			       TAG_END());
@@ -899,9 +899,9 @@ int api_test_user_via_fillin(agent_t *ag)
   /* This creates a delayed response message */
   orq0 = nta_outgoing_tcreate(leg, outgoing_callback, ag, NULL,
   		       SIP_METHOD_MESSAGE,
-  		       URL_STRING_MAKE("sip:foo.bar;transport=none"),
-  		       SIPTAG_FROM_STR("<sip:bar.foo>"),
-  		       SIPTAG_TO_STR("<sip:foo.bar>"),
+  		       URL_STRING_MAKE("sip:127.0.0.1;transport=tcp"),
+  		       SIPTAG_FROM_STR("<sip:127.0.0.1>"),
+  		       SIPTAG_TO_STR("<sip:127.0.0.1>"),
   		       TAG_END());
   TEST_1(orq0);
   TEST_1(msg0 = nta_outgoing_getrequest(orq0));
@@ -917,9 +917,9 @@ int api_test_user_via_fillin(agent_t *ag)
   /* This creates a delayed response message */
   orq1 = nta_outgoing_tcreate(leg, outgoing_callback, ag, NULL,
 			      SIP_METHOD_MESSAGE,
-			      URL_STRING_MAKE("sip:foo.bar;transport=none"),
-			      SIPTAG_FROM_STR("<sip:bar.foo>"),
-			      SIPTAG_TO_STR("<sip:foo.bar>"),
+			      URL_STRING_MAKE("sip:127.0.0.1;transport=tcp"),
+			      SIPTAG_FROM_STR("<sip:127.0.0.1>"),
+			      SIPTAG_TO_STR("<sip:127.0.0.1>"),
 			      NTATAG_USER_VIA(1),
 			      SIPTAG_VIA(via),
 			      TAG_END());
@@ -936,6 +936,8 @@ int api_test_user_via_fillin(agent_t *ag)
   for (i = 0; i < sizeof(via_params)/sizeof(via_params[0]); i++)
     TEST_S(via1->v_params[i], via_params[i]);
 
+  msg_unref(msg0);
+  msg_unref(msg1);
   TEST_VOID(nta_outgoing_destroy(orq0));
   TEST_VOID(nta_outgoing_destroy(orq1));
   TEST_VOID(nta_leg_destroy(leg));

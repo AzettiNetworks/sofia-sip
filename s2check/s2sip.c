@@ -587,6 +587,7 @@ s2_sip_request_to(struct dialog *d,
 
   tport = tport_tsend(tport, msg, tpn, ta_tags(ta));
   ta_end(ta);
+  msg_unref(msg);
 
   if (d->tport != tport) {
     tport_unref(d->tport);

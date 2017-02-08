@@ -565,7 +565,7 @@ void sipstats(msg_t *msg, uint32_t msize, sipstats_t *ss, context_t *ctx)
 
 void report_histogram(char const *title, histogram_t const *h)
 {
-  size_t i, min_i, max_i;
+  ssize_t i, min_i, max_i;
 
   for (i = 0; i < h->N && h->buckets[i] == 0.0; i++)
     ;

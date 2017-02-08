@@ -11,12 +11,12 @@ dnl information on the package
 dnl ---------------------------
 
 dnl update both the version for AC_INIT and the LIBSOFIA_SIP_UA_MAJOR_MINOR
-AC_INIT([sofia-sip], [1.12.11devel])
+AC_INIT([sofia-sip], [1.13.15bc])
 AC_CONFIG_SRCDIR([libsofia-sip-ua/sip/sofia-sip/sip.h])
 AC_CONFIG_MACRO_DIR([m4])
-AC_SUBST(VER_LIBSOFIA_SIP_UA_MAJOR_MINOR, [1.12])
+AC_SUBST(VER_LIBSOFIA_SIP_UA_MAJOR_MINOR, [1.13])
 dnl Includedir specific to this sofia version
-AC_SUBST(include_sofiadir, '${includedir}/sofia-sip-1.12')
+AC_SUBST(include_sofiadir, '${includedir}/sofia-sip-1.13')
 AC_SUBST(LIBVER_SOFIA_SIP_UA_CUR, [6])
 AC_SUBST(LIBVER_SOFIA_SIP_UA_REV, [0])
 AC_SUBST(LIBVER_SOFIA_SIP_UA_AGE, [6])
@@ -89,6 +89,9 @@ SOFIA_PLAT_CFLAGS=
 # This is a dirty hack, but shuts up all the warnings
 case "$host" in
      *-openbsd*) SOFIA_PLAT_CFLAGS="-DNULL='((void *)0L)'";;
+     *-darwin15*)
+      LDFLAGS="$LDFLAGS -framework CoreFoundation -framework SystemConfiguration"
+      SOFIA_CFLAGS="$SOFIA_CFLAGS -I/usr/local/include";;
      *) ;;
 esac
 
@@ -104,8 +107,8 @@ AC_ARG_ENABLE(64,
 if test "x${ax_cv_c_compiler_vendor}"  =  "xsun" ; then
     if test "${enable_64}" = "yes"; then
         SOFIA_CFLAGS="$SOFIA_CFLAGS -m64"
-	LDFLAGS="-m64 -Wl,-64"
-	export PKG_CONFIG_PATH=/usr/lib/64/pkgconfig
+        LDFLAGS="$LDFLAGS -m64 -Wl,-64"
+        export PKG_CONFIG_PATH=/usr/lib/64/pkgconfig
     fi
 fi
 

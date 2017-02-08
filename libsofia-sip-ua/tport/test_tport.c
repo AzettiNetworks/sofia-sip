@@ -78,7 +78,7 @@ struct tp_test_s {
   su_root_t *tt_root;
   msg_mclass_t *tt_mclass;
   tport_t   *tt_srv_tports;
-  tport_t   *tt_tports;
+  tport_t   *tt_cli_tports;
 
   tport_t   *tt_rtport;
 
@@ -147,6 +147,8 @@ static int name_test(tp_test_t *tt)
   su->su_family = AF_INET6;
   TEST(tport_convert_addr(home, tpn, "tcp", "localhost", su), 0);
 #endif
+
+  su_home_destroy(home);
 
   END();
 }
@@ -372,6 +374,7 @@ static void tp_test_recv(tp_test_t *tt,
   if (msg_has_error(msg)) {
     tt->tt_status = -1;
     tt->tt_rtport = tp;
+    msg_destroy(msg);
   }
   else if (test_msg_md5(tt, msg))
     msg_destroy(msg);
@@ -517,13 +520,13 @@ static int init_test(tp_test_t *tt)
 #endif
 
   /* Create client transport */
-  TEST_1(tt->tt_tports =
+  TEST_1(tt->tt_cli_tports =
 	 tport_tcreate(tt, tp_test_class, tt->tt_root,
 		       IF_SIGCOMP_TPTAG_COMPARTMENT(tt->master_cc)
 		       TAG_END()));
 
   /* Bind client transports */
-  TEST(tport_tbind(tt->tt_tports, myname, transports,
+  TEST(tport_tbind(tt->tt_cli_tports, myname, transports,
 		   TPTAG_SERVER(0), TAG_END()),
        0);
 
@@ -611,6 +614,7 @@ static int init_test(tp_test_t *tt)
 
     /* Check that no new primary transports has been added by failed call */
     TEST(before, after);
+    su_close(s); //We are not going to use it
 
     /* Add new transports to an ephemeral port with new identity */
 
@@ -650,7 +654,7 @@ static int init_test(tp_test_t *tt)
     tlsname->tpn_ident = "server";
 
     /* Bind client transports */
-    TEST(tport_tbind(tt->tt_tports, tlsname, transports,
+    TEST(tport_tbind(tt->tt_cli_tports, tlsname, transports,
 		     TPTAG_SERVER(0),
 		     TPTAG_CERTIFICATE(srcdir),
 		     TAG_END()),
@@ -782,7 +786,7 @@ static int udp_test(tp_test_t *tt)
 
   TEST(msg_serialize(msg, (void *)tst), 0);
 
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_udp_name, TAG_END()));
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_udp_name, TAG_END()));
 
   TEST_S(tport_name(tp)->tpn_ident, "client");
 
@@ -823,10 +827,8 @@ void server_closed_callback(tp_stack_t *tt, tp_client_t *client,
 {
   assert(msg == NULL);
   assert(client == NULL);
-  if (msg == NULL) {
-    tport_release(tp, pending_server_close, NULL, NULL, client, 0);
-    pending_server_close = 0;
-  }
+  tport_release(tp, pending_server_close, NULL, NULL, client, 0);
+  pending_server_close = 0;
 }
 
 void client_closed_callback(tp_stack_t *tt, tp_client_t *client,
@@ -834,10 +836,9 @@ void client_closed_callback(tp_stack_t *tt, tp_client_t *client,
 {
   assert(msg == NULL);
   assert(client == NULL);
-  if (msg == NULL) {
-    tport_release(tp, pending_client_close, NULL, NULL, client, 0);
-    pending_client_close = 0;
-  }
+  tport_release(tp, pending_client_close, NULL, NULL, client, 0);
+  pending_client_close = 0;
+
 }
 
 static int tcp_test(tp_test_t *tt)
@@ -845,14 +846,15 @@ static int tcp_test(tp_test_t *tt)
   BEGIN();
 
   msg_t *msg = NULL;
-  int i, N;
+  int i;
   tport_t *tp, *tp0;
   char ident[16];
   su_time_t started;
+  ssize_t sent_burst;
 
   /* Send a single message */
   TEST_1(!new_test_msg(tt, &msg, "tcp-first", 1, 1024));
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name, TAG_END()));
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name, TAG_END()));
   TEST_S(tport_name(tp)->tpn_ident, "client");
   tp0 = tport_incref(tp);
   msg_destroy(msg);
@@ -874,80 +876,72 @@ static int tcp_test(tp_test_t *tt)
   pending_server_close = tport_pend(tp, NULL, server_closed_callback, NULL);
   TEST_1(pending_server_close > 0);
 
-  N = 0; tt->tt_received = 0;
+  tt->tt_received = 0;
+  sent_burst = 0;
+
 
 #ifndef WIN32			/* Windows seems to be buffering too much */
 
-  /* Create a large message, just to force queueing in sending end */
-  TEST(new_test_msg(tt, &msg, "tcp-0", 1, 16 * 64 * 1024), 0);
-  test_create_md5(tt, msg);
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name, TAG_END()));
-  N++;
-  TEST_S(tport_name(tp)->tpn_ident, "client");
-  TEST_P(tport_incref(tp), tp0); tport_decref(&tp);
-  msg_destroy(msg);
-
-  /* Fill up the queue */
-  for (i = 1; i < TPORT_QUEUESIZE; i++) {
-    snprintf(ident, sizeof ident, "tcp-%u", i);
-
-    TEST(new_test_msg(tt, &msg, ident, 1, 64 * 1024), 0);
-    TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name, TAG_END()));
-    N++;
+  //Create 32kb packets until we fill the queue
+  for (i = 0; tport_queuelen(tp0) != TPORT_QUEUESIZE; i++) {
+    snprintf(ident, sizeof ident, "cid:tcp-%u", i);
+    TEST_1(!new_test_msg(tt, &msg, ident, 1, 32*1024));
+    test_create_md5(tt, msg);
+    TEST_1(tp = tport_tsend(tp0, msg, tt->tt_tcp_name, TAG_END()));
+    sent_burst++;
     TEST_S(tport_name(tp)->tpn_ident, "client");
     TEST_P(tport_incref(tp), tp0); tport_decref(&tp);
     msg_destroy(msg);
   }
 
-  /* This overflows the queue */
+  /* This *should* overflows the queue */
   TEST(new_test_msg(tt, &msg, "tcp-overflow", 1, 1024), 0);
-  TEST_1(!tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name, TAG_END()));
+  TEST_1(!tport_tsend(tp0, msg, tt->tt_tcp_name, TAG_END()));
   msg_destroy(msg);
 
-  TEST(tport_test_run(tt, 60), 1);
-  TEST_1(!check_msg(tt, tt->tt_rmsg, "tcp-0"));
-  test_check_md5(tt, tt->tt_rmsg);
-  msg_destroy(tt->tt_rmsg), tt->tt_rmsg = NULL;
-
-  if (tt->tt_received < TPORT_QUEUESIZE) { /* We have not received it all */
-    snprintf(ident, sizeof ident, "tcp-%u", tt->tt_received);
-    TEST(tport_test_run(tt, 5), 1);
-    TEST_1(!check_msg(tt, tt->tt_rmsg, ident));
-    msg_destroy(tt->tt_rmsg), tt->tt_rmsg = NULL;
+  while (tt->tt_received < sent_burst) {
+      SU_DEBUG_7(("Received %d of %lu pkts\n", tt->tt_received, sent_burst));
+      TEST(tport_test_run(tt, 5), 1);
+      /* Validate message */
+      TEST_1(!check_msg(tt, tt->tt_rmsg, NULL));
+      msg_destroy(tt->tt_rmsg), tt->tt_rmsg = NULL;
   }
+  SU_DEBUG_7(("Received %d of %lu pkts\n", tt->tt_received, sent_burst));
+
 #else
  (void)i; (void)ident;
 #endif
 
   /* This uses a new connection */
   TEST_1(!new_test_msg(tt, &msg, "tcp-no-reuse", 1, 1024));
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name,
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name,
        		   TPTAG_REUSE(0), TAG_END()));
-  N++;
+  sent_burst++;
   TEST_S(tport_name(tp)->tpn_ident, "client");
   TEST_1(tport_incref(tp) != tp0); tport_decref(&tp);
   msg_destroy(msg);
 
   /* This uses the old connection */
   TEST_1(!new_test_msg(tt, &msg, "tcp-reuse", 1, 1024));
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name,
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name,
        		   TPTAG_REUSE(1), TAG_END()));
-  N++;
+  sent_burst++;
   TEST_S(tport_name(tp)->tpn_ident, "client");
   TEST_1(tport_incref(tp) == tp0); tport_decref(&tp);
   msg_destroy(msg);
 
   /* Receive every message from queue */
-  while (tt->tt_received < N) {
+  while (tt->tt_received < sent_burst) {
     TEST(tport_test_run(tt, 5), 1);
     /* Validate message */
     TEST_1(!check_msg(tt, tt->tt_rmsg, NULL));
     msg_destroy(tt->tt_rmsg), tt->tt_rmsg = NULL;
   }
+  su_log("Received %d of %lu pkts\n", tt->tt_received, sent_burst);
 
   /* Try to send a single message */
   TEST_1(!new_test_msg(tt, &msg, "tcp-last", 1, 1024));
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name, TAG_END()));
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name, TAG_END()));
   TEST_S(tport_name(tp)->tpn_ident, "client");
   TEST_P(tport_incref(tp), tp0); tport_decref(&tp);
   msg_destroy(msg);
@@ -970,7 +964,7 @@ static int tcp_test(tp_test_t *tt)
 
   /* Again a single message */
   TEST_1(!new_test_msg(tt, &msg, "tcp-pingpong", 1, 512));
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name, TAG_END()));
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name, TAG_END()));
   TEST_S(tport_name(tp)->tpn_ident, "client");
   tp0 = tport_incref(tp);
   msg_destroy(msg);
@@ -1046,6 +1040,7 @@ static int test_incomplete(tp_test_t *tt)
   su_root_step(tt->tt_root, 50);
 
   tt->tt_received = 0;
+  tt->tt_rmsg = NULL;
   TEST(tport_test_run(tt, 5), -1);
   TEST(tt->tt_received, 1);
   TEST_P(tt->tt_rmsg, NULL);
@@ -1067,7 +1062,7 @@ static int reuse_test(tp_test_t *tt)
   /* Flush existing connections */
   *tpn = *tt->tt_tcp_name;
   tpn->tpn_port = "*";
-  TEST_1(tp = tport_by_name(tt->tt_tports, tpn));
+  TEST_1(tp = tport_by_name(tt->tt_cli_tports, tpn));
   TEST_1(tport_is_primary(tp));
   TEST(tport_flush(tp), 0);
 
@@ -1078,7 +1073,7 @@ static int reuse_test(tp_test_t *tt)
 
   /* Send two messages */
   TEST(new_test_msg(tt, &msg, "reuse-1", 1, 1024), 0);
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name, TAG_END()));
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name, TAG_END()));
   TEST_S(tport_name(tp)->tpn_ident, "client");
   TEST_1(tp0 = tport_incref(tp));
   TEST(tport_get_params(tp, TPTAG_REUSE_REF(reuse), TAG_END()), 1);
@@ -1086,7 +1081,7 @@ static int reuse_test(tp_test_t *tt)
   msg_destroy(msg), msg = NULL;
 
   TEST(new_test_msg(tt, &msg, "reuse-2", 1, 1024), 0);
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name, TAG_END()));
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name, TAG_END()));
   TEST_S(tport_name(tp)->tpn_ident, "client");
   TEST_1(tp1 = tport_incref(tp)); TEST_1(tp0 != tp1);
   TEST(tport_get_params(tp, TPTAG_REUSE_REF(reuse), TAG_END()), 1);
@@ -1103,7 +1098,7 @@ static int reuse_test(tp_test_t *tt)
   /* Enable reuse on single connection */
   TEST(tport_set_params(tp1, TPTAG_REUSE(1), TAG_END()), 1);
   TEST(new_test_msg(tt, &msg, "reuse-3", 1, 1024), 0);
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name,
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name,
 			  TPTAG_REUSE(1),
 			  TAG_END()));
   TEST_S(tport_name(tp)->tpn_ident, "client");
@@ -1115,13 +1110,13 @@ static int reuse_test(tp_test_t *tt)
   TEST(tport_test_run(tt, 5), 1);
   msg_destroy(tt->tt_rmsg), tt->tt_rmsg = NULL;
 
-  TEST_1(tp = tport_by_name(tt->tt_tports, tpn));
+  TEST_1(tp = tport_by_name(tt->tt_cli_tports, tpn));
   TEST_1(tport_is_primary(tp));
   TEST(tport_set_params(tp, TPTAG_REUSE(1), TAG_END()), 1);
 
   /* Send a single message with different connection */
   TEST_1(!new_test_msg(tt, &msg, "fresh-1", 1, 1024));
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_tcp_name,
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_tcp_name,
 			  TPTAG_FRESH(1),
 			  TPTAG_REUSE(1),
 			  TAG_END()));
@@ -1161,7 +1156,7 @@ static int sctp_test(tp_test_t *tt)
   /* Just a small and nice message first */
   TEST_1(!new_test_msg(tt, &msg, "cid:sctp-first", 1, 1024));
   test_create_md5(tt, msg);
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, tt->tt_sctp_name, TAG_END()));
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, tt->tt_sctp_name, TAG_END()));
   TEST_S(tport_name(tp)->tpn_ident, "client");
   msg_destroy(msg);
 
@@ -1209,7 +1204,7 @@ static int sctp_test(tp_test_t *tt)
   /* Try to overflow the queue */
   snprintf(buffer, sizeof buffer, "cid:sctp-%u", n + i);
   TEST_1(!new_test_msg(tt, &msg, buffer, 1, 1024));
-  TEST_1(!tport_tsend(tt->tt_tports, msg, tt->tt_sctp_name, TAG_END()));
+  TEST_1(!tport_tsend(tt->tt_cli_tports, msg, tt->tt_sctp_name, TAG_END()));
   msg_destroy(msg);
 
   TEST(tport_test_run(tt, 5), 1);
@@ -1220,7 +1215,7 @@ static int sctp_test(tp_test_t *tt)
 
   /* This uses a new connection */
   TEST_1(!new_test_msg(tt, &msg, "cid:sctp-new", 1, 1024));
-  TEST_1(tport_tsend(tt->tt_tports, msg, tt->tt_sctp_name,
+  TEST_1(tport_tsend(tt->tt_cli_tports, msg, tt->tt_sctp_name,
 		     TPTAG_REUSE(0), TAG_END()));
   msg_destroy(msg);
 
@@ -1234,7 +1229,7 @@ static int sctp_test(tp_test_t *tt)
 
   /* Try to send a single message */
   TEST_1(!new_test_msg(tt, &msg, "cid:sctp-final", 1, 512));
-  TEST_1(tport_tsend(tt->tt_tports, msg, tt->tt_sctp_name, TAG_END()));
+  TEST_1(tport_tsend(tt->tt_cli_tports, msg, tt->tt_sctp_name, TAG_END()));
   msg_destroy(msg);
 
   TEST(tport_test_run(tt, 10), 1);
@@ -1281,21 +1276,22 @@ static int tls_test(tp_test_t *tt)
 #if HAVE_TLS
   tp_name_t const *dst = tt->tt_tls_name;
   msg_t *msg = NULL;
-  int i;
-  char ident[16];
+  int i, sent_burst = 0;
   tport_t *tp, *tp0;
   struct called called[1] = {{ 0, 0, 0, 0 }};
 
   TEST_S(dst->tpn_proto, "tls");
 
+  tt->tt_received = 0;
   /* Send a single message */
   TEST_1(!new_test_msg(tt, &msg, "tls-first", 1, 1024));
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, dst, TAG_END()));
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, dst, TAG_END()));
+  sent_burst++;
   TEST_1(tp0 = tport_ref(tp));
   TEST_1(called->pending = tport_pend(tp, msg, tls_error_callback, (tp_client_t *)called));
 
   i = tport_test_run(tt, 5);
-  msg_destroy(msg);
+  msg_destroy(msg); msg = NULL;
 
   if (i < 0) {
     if (called->n) {
@@ -1311,53 +1307,25 @@ static int tls_test(tp_test_t *tt)
   TEST_1(!check_msg(tt, tt->tt_rmsg, "tls-first"));
   msg_destroy(tt->tt_rmsg), tt->tt_rmsg = NULL;
 
-  tport_set_params(tp, TPTAG_KEEPALIVE(100), TPTAG_IDLE(500), TAG_END());
-
-  /* Ask for notification upon close */
-  pending_client_close = tport_pend(tp0, NULL, client_closed_callback, NULL);
-  TEST_1(pending_client_close > 0);
-  tp = tt->tt_rtport;
-  pending_server_close = tport_pend(tp, NULL, server_closed_callback, NULL);
-
-  TEST_1(pending_server_close > 0);
-
-  /* Send a largish message */
-  TEST_1(!new_test_msg(tt, &msg, "tls-0", 16, 16 * 1024));
-  test_create_md5(tt, msg);
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, dst, TAG_END()));
-  TEST_1(tp == tp0);
-  msg_destroy(msg);
-
-  /* Fill up the queue */
-  for (i = 1; i < TPORT_QUEUESIZE; i++) {
-    snprintf(ident, sizeof ident, "tls-%u", i);
-
-    TEST_1(!new_test_msg(tt, &msg, ident, 2, 512));
-    TEST_1(tp = tport_tsend(tt->tt_tports, msg, dst, TAG_END()));
-    TEST_1(tp == tp0);
-    msg_destroy(msg);
-  }
-
   /* This uses a new connection */
   TEST_1(!new_test_msg(tt, &msg, "tls-no-reuse", 1, 1024));
-  TEST_1(tp = tport_tsend(tt->tt_tports, msg, dst,
+  TEST_1(tp = tport_tsend(tt->tt_cli_tports, msg, dst,
 		     TPTAG_REUSE(0), TAG_END()));
+  sent_burst++;
   TEST_1(tp != tp0);
-  msg_destroy(msg);
+  msg_destroy(msg); msg = NULL;
 
-  tt->tt_received = 0;
 
-  /* Receive every message from queue */
-  while (tt->tt_received < TPORT_QUEUESIZE + 1) {
+  /* Receive the messages we have sent */
+  while (tt->tt_received < sent_burst) {
     TEST(tport_test_run(tt, 5), 1);
-    /* Validate message */
     msg_destroy(tt->tt_rmsg), tt->tt_rmsg = NULL;
   }
 
-  /* Try to send a single message */
+  /* Check one more message */
   TEST_1(!new_test_msg(tt, &msg, "tls-last", 1, 1024));
-  TEST_1(tport_tsend(tt->tt_tports, msg, dst, TAG_END()));
-  msg_destroy(msg);
+  TEST_1(tport_tsend(tt->tt_cli_tports, msg, dst, TAG_END()));
+  msg_destroy(msg); msg = NULL;
 
   TEST(tport_test_run(tt, 5), 1);
 
@@ -1365,12 +1333,6 @@ static int tls_test(tp_test_t *tt)
   msg_destroy(tt->tt_rmsg), tt->tt_rmsg = NULL;
 
   tport_decref(&tp0);
-
-  /* Wait until notifications -
-     client closes when idle and notifys pending,
-     then server closes and notifys pending */
-  while (pending_server_close || pending_client_close)
-    su_root_step(tt->tt_root, 50);
 
 #endif
 
@@ -1389,11 +1351,11 @@ static int sigcomp_test(tp_test_t *tt)
   if (tt->tt_udp_comp->tpn_comp) {
     msg_t *msg = NULL;
 
-    TEST_1(cc = test_sigcomp_compartment(tt, tt->tt_tports, tt->tt_udp_comp));
+    TEST_1(cc = test_sigcomp_compartment(tt, tt->tt_cli_tports, tt->tt_udp_comp));
 
     TEST_1(!new_test_msg(tt, &msg, "udp-sigcomp", 1, 1200));
     test_create_md5(tt, msg);
-    TEST_1(tport_tsend(tt->tt_tports,
+    TEST_1(tport_tsend(tt->tt_cli_tports,
 		       msg,
 		       tt->tt_udp_comp,
 		       TPTAG_COMPARTMENT(cc),
@@ -1415,7 +1377,7 @@ static int sigcomp_test(tp_test_t *tt)
     tpn->tpn_comp = tport_name(tt->tt_rtport)->tpn_comp;
 
     /* reply */
-    TEST_1(cc = test_sigcomp_compartment(tt, tt->tt_tports, tpn));
+    TEST_1(cc = test_sigcomp_compartment(tt, tt->tt_cli_tports, tpn));
     TEST_1(tport_tsend(tt->tt_rtport, msg, tpn,
 		       TPTAG_COMPARTMENT(cc),
 		       TAG_END()) != NULL);
@@ -1440,8 +1402,8 @@ static int sigcomp_test(tp_test_t *tt)
 
     tport_log->log_level = 9;
 
-    TEST_1(cc = test_sigcomp_compartment(tt, tt->tt_tports, tpn));
-    TEST_1(tp = tport_tsend(tt->tt_tports,
+    TEST_1(cc = test_sigcomp_compartment(tt, tt->tt_cli_tports, tpn));
+    TEST_1(tp = tport_tsend(tt->tt_cli_tports,
 			    msg,
 			    tpn,
 			    TPTAG_COMPARTMENT(cc),
@@ -1457,7 +1419,7 @@ static int sigcomp_test(tp_test_t *tt)
 
     TEST_1(!new_test_msg(tt, &msg, "tcp-sigcomp-2", 1, 3000));
     test_create_md5(tt, msg);
-    TEST_1(tp = tport_tsend(tt->tt_tports,
+    TEST_1(tp = tport_tsend(tt->tt_cli_tports,
 			    msg,
 			    tt->tt_tcp_comp,
 			    TPTAG_COMPARTMENT(cc),
@@ -1474,7 +1436,7 @@ static int sigcomp_test(tp_test_t *tt)
 
     TEST_1(!new_test_msg(tt, &msg, "tcp-sigcomp-3", 1, 45500));
     test_create_md5(tt, msg);
-    TEST_1(tp = tport_tsend(tt->tt_tports,
+    TEST_1(tp = tport_tsend(tt->tt_cli_tports,
 			    msg,
 			    tt->tt_tcp_comp,
 			    TPTAG_COMPARTMENT(cc),
@@ -1497,7 +1459,7 @@ static int sigcomp_test(tp_test_t *tt)
 
       TEST_1(!new_test_msg(tt, &msg, "tcp-sigcomp-4", 1, 1000));
       test_create_md5(tt, msg);
-      TEST_1(tp = tport_tsend(tt->tt_tports,
+      TEST_1(tp = tport_tsend(tt->tt_cli_tports,
 			      msg,
 			      tpn,
 			      TPTAG_COMPARTMENT(cc),
@@ -1566,7 +1528,7 @@ static int stun_test(tp_test_t *tt)
 
   TEST_1(mr = tport_tcreate(tt, tp_test_class, tt->tt_root, TAG_END()));
 
-  TEST(tport_tbind(tt->tt_tports, tpn, transports, TPTAG_SERVER(1),
+  TEST(tport_tbind(tt->tt_cli_tports, tpn, transports, TPTAG_SERVER(1),
 		   STUNTAG_SERVER("999.999.999.999"),
 		   TAG_END()), -1);
 
@@ -1586,7 +1548,7 @@ static int deinit_test(tp_test_t *tt)
   BEGIN();
 
   /* Destroy client transports */
-  tport_destroy(tt->tt_tports), tt->tt_tports = NULL;
+  tport_destroy(tt->tt_cli_tports), tt->tt_cli_tports = NULL;
 
   /* Destroy server transports */
   tport_destroy(tt->tt_srv_tports), tt->tt_srv_tports = NULL;
@@ -1594,6 +1556,9 @@ static int deinit_test(tp_test_t *tt)
 #if HAVE_SIGCOMP
   sigcomp_state_handler_free(tt->state_handler); tt->state_handler = NULL;
 #endif
+
+  if (tt->tt_mclass) free(tt->tt_mclass), tt->tt_mclass = NULL;
+  if (tt->tt_root) su_root_destroy(tt->tt_root), tt->tt_root = NULL;
 
   END();
 }

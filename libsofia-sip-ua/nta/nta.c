@@ -3449,6 +3449,11 @@ int nta_msg_tsend(nta_agent_t *agent, msg_t *msg, url_string_t const *u,
 	tport = tport_by_name(agent->sa_tports, tpn);
       if (!tport)
 	tport = tport_by_protocol(agent->sa_tports, tpn->tpn_proto);
+      if (!tport){
+        SU_DEBUG_3(("%s: bad tport name, could not find tport.\n",what));
+        retval=-1;
+        goto end;
+      }
 
       if (retry_without_rport)
 	tpn->tpn_port = sip_via_port(sip->sip_via, NULL);
@@ -3470,18 +3475,22 @@ int nta_msg_tsend(nta_agent_t *agent, msg_t *msg, url_string_t const *u,
   }
   else {
     /* Send request */
-    if (outgoing_create(agent, NULL, NULL, u, NULL, msg_ref(msg),
+    if (outgoing_create(agent, NULL, NULL, u, NULL, msg,
 			NTATAG_STATELESS(1),
-			ta_tags(ta)))
+			ta_tags(ta))){
+	  /* a stateless outgoing was created and took ownership of the message*/
       retval = 0;
+	  msg = NULL;
+	}
   }
 
+end:
   if (retval == 0)
     SU_DEBUG_5(("%s\n", what));
 
   ta_end(ta);
 
-  msg_destroy(msg);
+  if (msg) msg_destroy(msg);
 
   return retval;
 }
@@ -3725,6 +3734,7 @@ int nta_msg_ackbye(nta_agent_t *agent, msg_t *msg)
   url_string_t const *ruri;
   nta_outgoing_t *ack = NULL, *bye = NULL;
   sip_cseq_t *cseq;
+  sip_max_forwards_t *mf;
   sip_request_t *rq;
   sip_route_t *route = NULL, *r, r0[1];
   su_home_t *home = msg_home(amsg);
@@ -3743,7 +3753,14 @@ int nta_msg_ackbye(nta_agent_t *agent, msg_t *msg)
   } else {
     ruri = (url_string_t const *)sip->sip_to->a_url;
   }
-
+  /*SM: I commented out the following code supposed to manage routes.
+   * Indeed when the proxy is in the middle of the message's path, only part of the
+   * record-routes are relevant to make a Route header.
+   * It is actually too complicated to guess here which part of Record-Route corresponds to 
+   * proxies between us and the target user-agent.
+   * The code below can only work if nta_msg_ackbye() is invoked at the UA that created the call.
+   * Once, removed nta_msg_ackbye() can only work when invoked by the last proxy (typically the forking proxy)*/
+#if 0
   /* Reverse (and fix) record route */
   route = sip_route_reverse(home, sip->sip_record_route);
 
@@ -3761,6 +3778,7 @@ int nta_msg_ackbye(nta_agent_t *agent, msg_t *msg)
   }
 
   msg_header_insert(amsg, (msg_pub_t *)asip, (msg_header_t *)route);
+#endif
 
   bmsg = msg_copy(amsg); bsip = sip_object(bmsg);
 
@@ -3773,6 +3791,10 @@ int nta_msg_ackbye(nta_agent_t *agent, msg_t *msg)
     goto err;
   else
     msg_header_insert(amsg, (msg_pub_t *)asip, (msg_header_t *)rq);
+  if (!(mf = sip_max_forwards_make(home, "70")))
+    goto err;
+  else
+    msg_header_insert(amsg, (msg_pub_t *)asip, (msg_header_t *)mf);
 
   if (!(ack = nta_outgoing_mcreate(agent, NULL, NULL, NULL, amsg,
 				   NTATAG_ACK_BRANCH(sip->sip_via->v_branch),
@@ -3784,10 +3806,14 @@ int nta_msg_ackbye(nta_agent_t *agent, msg_t *msg)
 
   home = msg_home(bmsg);
 
-  if (!(cseq = sip_cseq_create(home, 0x7fffffff, SIP_METHOD_BYE)))
+  if (!(cseq = sip_cseq_create(home, sip->sip_cseq->cs_seq+1, SIP_METHOD_BYE)))
     goto err;
   else
     msg_header_insert(bmsg, (msg_pub_t *)bsip, (msg_header_t *)cseq);
+  if (!(mf = sip_max_forwards_make(home, "70")))
+    goto err;
+  else
+    msg_header_insert(bmsg, (msg_pub_t *)bsip, (msg_header_t *)mf);
 
   if (!(rq = sip_request_create(home, SIP_METHOD_BYE, ruri, NULL)))
     goto err;
@@ -5267,9 +5293,11 @@ nta_incoming_t *nta_incoming_create(nta_agent_t *agent,
 
   irq = incoming_create(agent, msg, sip, tport, to_tag);
 
-  if (!irq)
+  if (!irq){
     msg_destroy(msg);
-
+  }else{
+    SU_DEBUG_1(("%s: created incoming transaction %p\n", __func__, irq));
+  }
   return irq;
 }
 
@@ -5468,6 +5496,7 @@ void nta_incoming_destroy(nta_incoming_t *irq)
       else if (irq->irq_status < 200)
 	nta_incoming_treply(irq, SIP_500_INTERNAL_SERVER_ERROR, TAG_END());
     }
+    SU_DEBUG_1(("%s: %p\n", __func__, irq));
   }
 }
 
@@ -5686,6 +5715,7 @@ void incoming_reclaim(nta_incoming_t *irq)
   su_free(home, irq);
 
   msg_destroy((msg_t *)home);
+  SU_DEBUG_1(("%s: %p\n", __func__, irq));
 }
 
 /** Queue request to be freed */
@@ -7694,7 +7724,9 @@ nta_outgoing_t *outgoing_create(nta_agent_t *agent,
   char const *tp_ident;
   int delay_sending = 0, sigcomp_zap = 0;
   int pass_100 = agent->sa_pass_100, use_timestamp = agent->sa_timestamp;
+#if HAVE_SOFIA_SRESOLV
   enum nta_res_order_e res_order = agent->sa_res_order;
+#endif
   struct sigcomp_compartment *cc = NULL;
   ta_list ta;
   char const *scheme = NULL;
@@ -7706,10 +7738,12 @@ nta_outgoing_t *outgoing_create(nta_agent_t *agent,
   tagi_t const *t;
   tport_t *override_tport = NULL;
 
+#if HAVE_SOFIA_SRESOLV
   if (!agent->sa_tport_ip6)
     res_order = nta_res_ip4_only;
   else if (!agent->sa_tport_ip4)
     res_order = nta_res_ip6_only;
+#endif
 
   if (!callback)
     callback = outgoing_default_cb;
@@ -7951,8 +7985,9 @@ nta_outgoing_t *outgoing_create(nta_agent_t *agent,
 
     if (orq->orq_status < 300)
       retval = (void *)-1;	/* NONE */
-    else
-      retval = NULL, orq->orq_request = NULL;
+    else{
+      retval = NULL, orq->orq_request = NULL; /*when returning NULL (failure case), let the caller free the message*/
+    }
 
     outgoing_free(orq);
 
@@ -7981,15 +8016,15 @@ outgoing_prepare_send(nta_outgoing_t *orq)
   if (!tpn->tpn_port)
     tpn->tpn_port = "";
 
-  tp = tport_by_name(sa->sa_tports, tpn);
-
   if (tpn->tpn_port[0] == '\0') {
-    if (orq->orq_sips || tport_has_tls(tp))
+    if (su_strcasecmp(tpn->tpn_proto, "tls") == 0)
       tpn->tpn_port = "5061";
     else
       tpn->tpn_port = "5060";
   }
 
+  tp = tport_by_name(sa->sa_tports, tpn);
+  
   if (tp) {
     outgoing_send_via(orq, tp);
   }
@@ -8870,7 +8905,10 @@ size_t outgoing_timer_c(outgoing_queue_t *q,
      * If the client transaction has received a provisional response, the
      * proxy MUST generate a CANCEL request matching that transaction.
      */
-    nta_outgoing_tcancel(orq, NULL, NULL, TAG_NULL());
+    if (!orq->orq_destroyed) /*check if the transaction is already marked as destroyed, otherwise cancel has no effect*/
+      nta_outgoing_tcancel(orq, NULL, NULL, TAG_NULL());
+    else
+      outgoing_complete(orq); /*in that case simply mark the transaction as completed so that it will be freed.*/
   }
 
   return timeout;
@@ -9196,8 +9234,10 @@ int outgoing_recv(nta_outgoing_t *_orq,
 
     if (status < 200) {
       outgoing_send(cancel, 0);
-      if (outgoing_complete(orq))
+      if (outgoing_complete(orq)){
+        msg_destroy(msg);
 	return 0;
+      }
     }
     else {
       outgoing_reply(cancel, SIP_481_NO_TRANSACTION, 0);

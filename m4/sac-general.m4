@@ -263,8 +263,10 @@ dnl ======================================================================
 AC_DEFUN([AC_C_VAR_FUNC],
 [AC_REQUIRE([AC_PROG_CC])
 AC_CACHE_CHECK(whether $CC recognizes __func__, ac_cv_c_var_func,
-AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[char *s = __func__;
-]])],[ac_cv_c_var_func=yes],[ac_cv_c_var_func=no]))
+AC_COMPILE_IFELSE(
+    [AC_LANG_PROGRAM([[]], [[static const char *s = __func__; if (!s) return -1;]])],
+        [ac_cv_c_var_func=yes],
+        [ac_cv_c_var_func=no]))
 if test $ac_cv_c_var_func = "yes"; then
 AC_DEFINE([HAVE_FUNC], 1, [Define to 1 if the C compiler supports __func__])
 fi
@@ -274,7 +276,7 @@ AC_DEFUN([AC_C_MACRO_FUNCTION],
 [AC_REQUIRE([AC_PROG_CC])
 AC_CACHE_CHECK(whether $CC recognizes __FUNCTION__, ac_cv_c_macro_function,
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[
-char *s = __FUNCTION__;
+static const char *s = __FUNCTION__; if (!s) return -1;
 ]])],[ac_cv_c_macro_function=yes],[ac_cv_c_macro_function=no]))
 if test $ac_cv_c_macro_function = "yes"; then
 AC_DEFINE([HAVE_FUNCTION], 1, [Define to 1 if the C compiler supports __FUNCTION__])

@@ -273,6 +273,8 @@ int main(int argc, char *argv[])
     su_timer_destroy(timers[i]);
   }
 
+  free(timers);
+
   su_root_destroy(root);
 
   su_deinit();

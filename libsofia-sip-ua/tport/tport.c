@@ -154,6 +154,8 @@ static void tplist_remove(tport_t **list, tport_t *tp)
   TP_REMOVE(tp);
 }
 
+static tport_t *tport_by_name_from_primary(tport_t const *self, tp_name_t const *tpn);
+
 enum {
   /** Default per-thread read queue length */
   THRP_PENDING = 8
@@ -535,6 +537,7 @@ tport_t *tport_tcreate(tp_stack_t *stack,
   tpp->tpp_pong2ping = 0;
   tpp->tpp_stun_server = 1;
   tpp->tpp_tos = -1;                  /* set invalid, valid values are 0-255 */
+  tpp->tpp_dos_time_period = 1000;
 
   tpn = mr->mr_master->tp_name;
   tpn->tpn_proto = "*";
@@ -892,6 +895,7 @@ tport_t *tport_alloc_secondary(tport_primary_t *pri,
 {
   tport_master_t *mr = pri->pri_master;
   tport_t *self;
+  struct timeval now;
 
   self = su_home_clone(mr->mr_home, pri->pri_vtable->vtp_secondary_size);
 
@@ -913,6 +917,11 @@ tport_t *tport_alloc_secondary(tport_primary_t *pri,
 
     self->tp_timer = su_timer_create(su_root_task(mr->mr_root), 0);
     self->tp_stime = self->tp_ktime = self->tp_rtime = su_now();
+
+	gettimeofday(&now, NULL);
+	self->tp_dos_stats.last_check_recv_msg_check_time = now.tv_sec * 1000 + (now.tv_usec / 1000);
+	self->tp_dos_stats.recv_msg_count_since_last_check = 0;
+	self->tp_dos_stats.packet_count_rate = 0;
 
     if (pri->pri_vtable->vtp_init_secondary &&
 	pri->pri_vtable->vtp_init_secondary(self, socket, accepted,
@@ -1028,7 +1037,11 @@ tport_t *tport_base_connect(tport_primary_t *pri,
 		  __func__, (void *)self, su_strerror(su_errno())));
     }
     else {
-      susa.su_port = 0;
+      if (susa.su_sa.sa_family == AF_INET) {
+        susa.su_sin.sin_port = 0;
+    } else {
+        susa.su_sin6.sin6_port = 0;
+    }
       if (bind(s, &susa.su_sa, susalen) < 0) {
 	SU_DEBUG_3(("%s(%p): bind(local-ip): %s\n",
 		    __func__, (void *)self, su_strerror(su_errno())));
@@ -1300,6 +1313,8 @@ int tport_get_params(tport_t const *self,
 		      TPTAG_LOG(mr->mr_log != 0)),
 	       TAG_IF((void *)self == (void *)mr,
 		      TPTAG_DUMP(mr->mr_dump)),
+	       TPTAG_DOS(tpp->tpp_dos_time_period),
+		   TPTAG_TLS_VERIFY_POLICY(tpp->tls_verify_policy),
 	       TAG_END());
 
   ta_end(ta);
@@ -1360,6 +1375,7 @@ int tport_set_params(tport_t *self,
 	      TPTAG_REUSE_REF(reusable),
 	      TPTAG_STUN_SERVER_REF(stun_server),
 	      TPTAG_TOS_REF(tpp->tpp_tos),
+	      TPTAG_DOS_REF(tpp->tpp_dos_time_period),
 	      TAG_END());
 
   if (self == (tport_t *)self->tp_master)
@@ -2963,6 +2979,7 @@ int tport_recv_data(tport_t *self)
 void tport_recv_event(tport_t *self)
 {
   int again;
+  struct timeval now;
 
   SU_DEBUG_7(("%s(%p)\n", "tport_recv_event", (void *)self));
 
@@ -2998,6 +3015,20 @@ void tport_recv_event(tport_t *self)
   if (!tport_is_secondary(self))
     return;
 
+  self->tp_dos_stats.recv_msg_count_since_last_check++;
+  gettimeofday(&now, NULL);
+  double now_in_millis = now.tv_sec * 1000 + (now.tv_usec / 1000);
+  double time_elapsed = now_in_millis - self->tp_dos_stats.last_check_recv_msg_check_time;
+  if (time_elapsed < 0) {
+	self->tp_dos_stats.packet_count_rate = 0;
+	self->tp_dos_stats.recv_msg_count_since_last_check = 0;
+	self->tp_dos_stats.last_check_recv_msg_check_time = now_in_millis;
+  } else if (time_elapsed >= self->tp_params->tpp_dos_time_period) {
+	self->tp_dos_stats.packet_count_rate = self->tp_dos_stats.recv_msg_count_since_last_check / time_elapsed * 1000;
+	self->tp_dos_stats.recv_msg_count_since_last_check = 0;
+	self->tp_dos_stats.last_check_recv_msg_check_time = now_in_millis;
+  }
+
   if (again == 0 && !tport_is_dgram(self)) {
     /* End of stream */
     if (!self->tp_closed) {
@@ -3022,6 +3053,9 @@ static void tport_parse(tport_t *self, int complete, su_time_t now)
   for (; msg; msg = next) {
     n = msg_extract(msg);	/* Parse message */
 
+    SU_DEBUG_5(("%s(%p): Parse message %s\n",
+            __func__, (void *)self,
+            (n > 0 ? "COMPLETE" : (n == 0 ? "INCOMPLETE" : "INVALID") )));
     streaming = 0;
 
     if (n == 0) {
@@ -3111,13 +3145,16 @@ void tport_deliver(tport_t *self,
 
   error = msg_has_error(msg);
 
-  if (error && !*msg_chain_head(msg)) {
-    /* This is badly damaged packet */
-  }
-  else if (self->tp_master->mr_log && msg != self->tp_rlogged) {
-    char const *via = "recv";
-    tport_log_msg(self, msg, via, "from", now);
+  if (self->tp_master->mr_log && msg != self->tp_rlogged) {
     self->tp_rlogged = msg;
+    if (error && !*msg_chain_head(msg)) {
+      su_log("   Badly damaged packet received from " TPN_FORMAT "\n",
+              TPN_ARGS(d->d_from));
+    }
+    else {
+      char const *via = "recv";
+      tport_log_msg(self, msg, via, "from", now);
+    }
   }
 
   SU_DEBUG_7(("%s(%p): %smsg %p ("MOD_ZU" bytes)"
@@ -3183,6 +3220,20 @@ su_strlst_t const *tport_delivered_from_subjects(tport_t *tp, msg_t const *msg)
   else
     return NULL;
 }
+
+
+/** Return TLS client certificate sha1 fingerprint */
+unsigned char *
+tport_delivered_sha1_fingerprint(tport_t *tp, msg_t const *msg)
+{
+  if (tp && msg && msg == tp->tp_master->mr_delivery->d_msg) {
+    tport_t *tp_sec = tp->tp_master->mr_delivery->d_tport;
+    return tp_sec ? tp_sec->tp_sha1_fingerprint : NULL;
+  }
+  else
+    return NULL;
+}
+
 
 /** Return UDVM used to decompress the message. */
 int
@@ -3344,7 +3395,7 @@ tport_t *tport_tsend(tport_t *self,
   int reuse, sdwn_after, close_after, resolved = 0, fresh;
   unsigned mtu;
   su_addrinfo_t *ai;
-  tport_primary_t *primary;
+  tport_t *primary;
   tp_name_t tpn[1];
   struct sigcomp_compartment *cc;
 
@@ -3360,20 +3411,9 @@ tport_t *tport_tsend(tport_t *self,
   SU_DEBUG_7(("tport_tsend(%p) tpn = " TPN_FORMAT "\n",
 	      (void *)self, TPN_ARGS(tpn)));
 
-  if (tport_is_master(self)) {
-    primary = (tport_primary_t *)tport_primary_by_name(self, tpn);
-    if (!primary) {
-      msg_set_errno(msg, EPROTONOSUPPORT);
-      return NULL;
-    }
-  }
-  else {
-    primary = self->tp_pri;
-  }
-
   ta_start(ta, tag, value);
 
-  reuse = primary->pri_primary->tp_reusable && self->tp_reusable;
+  reuse = self->tp_reusable;
   fresh = 0;
   sdwn_after = 0;
   close_after = 0;
@@ -3423,26 +3463,42 @@ tport_t *tport_tsend(tport_t *self,
 
   if (fresh) {
     /* Select a primary protocol, make a fresh connection */
-    self = primary->pri_primary;
+    self = tport_primary_by_name(self, tpn);
   }
   else if (tport_is_secondary(self) && tport_is_clear_to_send(self)) {
-    self = self;
+    /* It is possible to use the current connection */
+    ;
   }
-  /*
-   * Try to find an already open connection to the destination,
-   * or get a primary protocol
-   */
   else {
-    /* If primary, resolve the destination address, store it in the msg */
-    if (tport_resolve(primary->pri_primary, msg, tpn) < 0) {
-      return NULL;
+    if (tport_is_master(self)) {
+      /* tport_by_name() might return a secondary transport if exist,
+       * otherwise a primary transport */
+      primary = tport_by_name(self, tpn);
+      if (!primary) {
+        msg_set_errno(msg, EPROTONOSUPPORT);
+        return NULL;
+      }
     }
-    resolved = 1;
+    else {
+      primary = (tport_t *) self->tp_pri;
+    }
 
-    self = tport_by_addrinfo(primary, msg_addrinfo(msg), tpn);
+    if (tport_is_secondary(primary) && tport_is_clear_to_send(primary)) {
+      self = (tport_t *) primary;
+    }
+    else {
+      /* If primary, resolve the destination address, store it in the msg */
+      if (tport_resolve(primary->tp_pri->pri_primary, msg, tpn) < 0) {
+        return NULL;
+      }
+      resolved = 1;
 
-    if (!self)
-      self = primary->pri_primary;
+      self = tport_by_addrinfo((tport_primary_t *) primary,
+                               msg_addrinfo(msg), tpn);
+
+      if (!self)
+        self = primary->tp_pri->pri_primary;
+    }
   }
 
   if (tport_is_primary(self)) {
@@ -3465,7 +3521,7 @@ tport_t *tport_tsend(tport_t *self,
 	tpn->tpn_comp = NULL;
 
       /* Create a secondary transport which is connected to the destination */
-      self = tport_connect(primary, msg_addrinfo(msg), tpn);
+      self = tport_connect((tport_primary_t *) self, msg_addrinfo(msg), tpn);
 
 #if 0 && HAVE_UPNP /* We do not want to use UPnP with secondary transports! */
       upnp_deregister_upnp_client(0, 0);
@@ -4544,7 +4600,7 @@ tport_t *tport_primary_by_name(tport_t const *tp, tp_name_t const *tpn)
   for (; self; self = self->pri_next) {
     tp = self->pri_primary;
 
-    if (ident && strcmp(ident, tp->tp_ident))
+    if (ident && (tp->tp_ident==NULL || strcmp(ident, tp->tp_ident)!=0))
       continue;
     if (family) {
       if (family == AF_INET && !tport_has_ip4(tp))
@@ -4572,9 +4628,97 @@ tport_t *tport_primary_by_name(tport_t const *tp, tp_name_t const *tpn)
     return (tport_t *)nocomp;
 }
 
+/* this version goes into all matching primaries for the requested transport name*/
+tport_t *tport_by_name(tport_t const *tp, tp_name_t const *tpn)
+{
+  char const *ident = tpn->tpn_ident;
+  char const *proto = tpn->tpn_proto;
+  char const *comp = tpn->tpn_comp;
+  int family = 0;
+  tport_t const *default_primary = NULL;
+  tport_primary_t const *self, *nocomp = NULL;
+
+  self = tp ? tp->tp_master->mr_primaries : NULL;
+
+  if (ident && strcmp(ident, tpn_any) == 0)
+    ident = NULL;
+
+  if (tpn->tpn_host == NULL)
+    family = 0;
+#if SU_HAVE_IN6
+  else if (host_is_ip6_address(tpn->tpn_host) || host_is_ip6_reference(tpn->tpn_host))
+    family = AF_INET6;
+#endif
+  else if (host_is_ip4_address(tpn->tpn_host))
+    family = AF_INET;
+  else
+    family = 0;
+
+
+  if (proto && strcmp(proto, tpn_any) == 0)
+    proto = NULL;
+
+  if ( proto == NULL && (family != 0 || (tpn->tpn_port != NULL && *tpn->tpn_port != '\0') )){
+     /*according to https://tools.ietf.org/html/rfc3263#page-6 4. Selecting a transport protocol
+      * When no transport is specified, if ip address is numeric or port number is specified, then use UDP*/
+     proto = "udp";
+  }
+
+  if (!ident && !proto && !family && !comp)
+    return (tport_t *)self;		/* Anything goes */
+
+  comp = tport_canonize_comp(comp);
+
+  for (; self; self = self->pri_next) {
+    tport_t const *secondary;
+    tp = self->pri_primary;
+
+    if (ident && (tp->tp_ident==NULL || strcmp(ident, tp->tp_ident)!=0))
+      continue;
+    if (family) {
+      if (family == AF_INET && !tport_has_ip4(tp))
+	continue;
+#if SU_HAVE_IN6
+      if (family == AF_INET6 && !tport_has_ip6(tp))
+	continue;
+#endif
+    }
+    if (proto && !su_casematch(proto, tp->tp_protoname))
+      continue;
+
+    if (comp && comp != tp->tp_name->tpn_comp) {
+      if (tp->tp_name->tpn_comp == NULL && nocomp == NULL)
+	nocomp = self;
+      continue;
+    }
+
+    if (family == AF_INET && tpn->tpn_host && strcmp(tpn->tpn_host, "127.0.0.1") == 0 && ntohl(tp->tp_addr->su_sin.sin_addr.s_addr) == INADDR_LOOPBACK) {
+      SU_DEBUG_7(("tport: default primary changed to AF_INET loopback\n"));
+      default_primary = tp;
+    } else if (family == AF_INET6 && tpn->tpn_host && strcmp(tpn->tpn_host, "::1") == 0 && IN6_IS_ADDR_LOOPBACK(&tp->tp_addr->su_sin6.sin6_addr)) {
+      SU_DEBUG_7(("tport: default primary changed to AF_INET6 loopback\n"));
+      default_primary = tp;
+    }
+    if (!default_primary) {
+      default_primary=tp;
+    }
+
+
+    secondary=tport_by_name_from_primary(tp,tpn);
+    if (secondary) {
+      SU_DEBUG_7(("tport(%p): found from primary " TPN_FORMAT "\n",
+		(void *)secondary, TPN_ARGS(tpn)));
+      return (tport_t*)secondary;
+    }else{
+       SU_DEBUG_7(("tport: not found from primary %p, trying another one..." TPN_FORMAT "\n",
+				(void *)self, TPN_ARGS(tpn)));
+    }
+  }
+  return (tport_t*)default_primary;
+}
 
 /** Get transport by name. */
-tport_t *tport_by_name(tport_t const *self, tp_name_t const *tpn)
+static tport_t *tport_by_name_from_primary(tport_t const *self, tp_name_t const *tpn)
 {
   tport_t const *sub, *next;
   char const *canon, *host, *port, *comp;
@@ -4584,11 +4728,10 @@ tport_t *tport_by_name(tport_t const *self, tp_name_t const *tpn)
 
   assert(self); assert(tpn);
 
-  assert(tpn->tpn_proto); assert(tpn->tpn_host); assert(tpn->tpn_port);
-  assert(tpn->tpn_canon);
+  if (!tpn->tpn_proto || !tpn->tpn_host || !tpn->tpn_port || !tpn->tpn_canon)
+    return NULL;
 
-  if (!tport_is_primary(self))
-    self = tport_primary_by_name(self, tpn);
+  assert(tport_is_primary(self));
 
   host = strcmp(tpn->tpn_host, tpn_any) ? tpn->tpn_host : NULL;
   port = strcmp(tpn->tpn_port, tpn_any) ? tpn->tpn_port : NULL;
@@ -4698,7 +4841,7 @@ tport_t *tport_by_name(tport_t const *self, tp_name_t const *tpn)
     }
   }
 
-  return (tport_t *)self;
+  return (tport_t *)NULL;
 }
 
 /** Get transport from primary by addrinfo. */
@@ -4800,7 +4943,15 @@ int tport_name_by_url(su_home_t *home,
     su_free(home, b);
     return -1;
   }
-
+  /*ipv6 addresses are enclosed by [ ] in urls, remove them.
+   Note that it seems that in sofia-sip the tport_name_t::tpn_host can carry both enclosed and non-enclosed ipv6 addresses*/
+  if (url->url_host && url->url_host[0] == '['){
+	  char *end = strchr(url->url_host,']');
+	  if (end){
+		url->url_host++;
+		*end = '\0';
+	  }
+  }
   tpn->tpn_proto = url_tport_default((enum url_type_e)url->url_type);
   tpn->tpn_canon = url->url_host;
   tpn->tpn_host = url->url_host;
@@ -5023,4 +5174,12 @@ void tport_sent_message(tport_t *self, msg_t *msg, int error)
 
   self->tp_stats.sent_msgs++;
   self->tp_stats.sent_errors += error;
+}
+
+float tport_get_packet_count_rate(tport_t *tp) {
+	return tp->tp_dos_stats.packet_count_rate;
+}
+
+void tport_reset_packet_count_rate(tport_t *tp) {
+	tp->tp_dos_stats.packet_count_rate = 0;
 }

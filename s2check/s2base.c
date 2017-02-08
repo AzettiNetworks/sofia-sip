@@ -162,13 +162,12 @@ void
 s2_teardown(void)
 {
   struct s2base *_zap = s2base;
-
-  s2base = NULL;
-
   su_root_destroy(_zap->root);
   su_deinit();
 
   stamps.toredown = now();
+  su_home_unref(s2base->home);
+  s2base = NULL;
 
   if (s2_start_stop > 1) {
     double ms = (stamps.toredown - stamps.setup) * 1000.0;
